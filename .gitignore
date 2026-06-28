@@ -1,0 +1,24 @@
+# Confidential — never commit local secrets, design docs, or briefs
+*.pdf
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Scratch / data
+scratch/
+*.local
+.claude/
