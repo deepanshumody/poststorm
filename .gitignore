@@ -22,3 +22,7 @@ dist/
 scratch/
 *.local
 .claude/
+poststorm/.venv/
+poststorm/data/
+poststorm/**/__pycache__/
+poststorm/.pytest_cache/
