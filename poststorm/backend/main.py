@@ -1,17 +1,24 @@
 import glob
 import json
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.jobs import run_job
 
 app = FastAPI(title="PostStorm")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+_INDEX = Path(__file__).resolve().parents[1] / "frontend" / "index.html"
 JOBS: dict[str, list[str]] = {}
+
+
+@app.get("/")
+def index():
+    return FileResponse(_INDEX)
 
 
 @app.post("/jobs")

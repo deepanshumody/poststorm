@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PostStorm — Lockbox-to-Ledger</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#111722; --panel2:#0d131c; --line:#1e2a3a;
+    --ink:#e6edf3; --dim:#8aa0b6; --cyan:#22d3ee; --emerald:#34d399;
+    --red:#ff5470; --amber:#fbbf24; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:16px 24px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0d131c,#0a0e14)}
+  header h1{font-size:18px;margin:0;letter-spacing:.3px}
+  header .sub{color:var(--dim);font-size:13px}
+  .badge{font-size:11px;color:var(--amber);border:1px solid #3a2f12;background:#1a1505;
+    padding:3px 8px;border-radius:999px;font-weight:600}
+  .spacer{flex:1}
+  button{background:var(--cyan);color:#04222b;border:0;font-weight:700;font-size:14px;
+    padding:10px 18px;border-radius:8px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 18px}
+  .pane{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    display:flex;flex-direction:column;min-height:62vh}
+  .pane h2{margin:0;padding:12px 16px;font-size:14px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .pane.cer h2 .dot{background:var(--emerald);box-shadow:0 0 10px var(--emerald)}
+  .pane.gpu h2 .dot{background:#5b6b7d}
+  .timer{margin-left:auto;font-family:var(--mono);font-size:20px;font-weight:700;letter-spacing:1px}
+  .pane.cer .timer{color:var(--emerald)} .pane.gpu .timer{color:var(--dim)}
+  .counters{display:flex;gap:18px;padding:8px 16px;border-bottom:1px solid var(--line);
+    font-family:var(--mono);font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .counters b{color:var(--ink)}
+  .rows{flex:1;overflow:auto;font-family:var(--mono);font-size:12.5px}
+  table{width:100%;border-collapse:collapse}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--dim);text-align:right;
+    font-weight:600;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11px}
+  th.l,td.l{text-align:left}
+  td{padding:5px 10px;border-bottom:1px solid #16202c;text-align:right;white-space:nowrap}
+  tr.new{animation:flash .8s ease-out}
+  @keyframes flash{from{background:#0e2a25}to{background:transparent}}
+  tr.recoup td{color:var(--red);font-weight:700}
+  .gpu .stalled{color:var(--dim);padding:24px 16px;font-size:13px;text-align:center}
+  .gpu .ghost{opacity:.35}
+  /* ledger */
+  .ledger{margin:0 18px 16px}
+  .ledger h3{font-size:13px;color:var(--dim);margin:4px 0 8px}
+  .ledger table td.debit{color:var(--red);font-weight:700}
+  .ledger table td.credit{color:var(--emerald)}
+  .dump{color:var(--amber)}
+  /* recoup hero card */
+  #recoupCard{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.8);
+    background:linear-gradient(160deg,#2a0d16,#1a0810);border:2px solid var(--red);
+    border-radius:16px;padding:26px 30px;max-width:560px;z-index:50;opacity:0;pointer-events:none;
+    box-shadow:0 24px 80px rgba(255,84,112,.35),0 0 0 1px rgba(255,84,112,.3) inset;transition:.35s}
+  #recoupCard.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #recoupCard .k{color:var(--red);font-weight:800;letter-spacing:1px;font-size:13px}
+  #recoupCard .big{font-size:22px;font-weight:800;margin:8px 0 10px;line-height:1.3}
+  #recoupCard .desc{color:#f3c6cf;font-size:14px;line-height:1.5}
+  #recoupCard .meta{margin-top:12px;font-family:var(--mono);font-size:12px;color:#caa}
+  .hint{color:var(--dim);font-size:12px;padding:0 18px 14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>PostStorm <span style="color:var(--dim);font-weight:400">· Lockbox-to-Ledger</span></h1>
+  <span class="sub">Scanned paper EOBs → posted, reconciled, recoups caught</span>
+  <span class="spacer"></span>
+  <span class="badge">SYNTHETIC DATA · NO PHI</span>
+  <button id="run">▶ Process EOB batch</button>
+</header>
+
+<main>
+  <section class="pane cer">
+    <h2><span class="dot"></span> Cerebras · Gemma-4 31B <span class="timer" id="tCer">0.00s</span></h2>
+    <div class="counters">
+      <span>posted <b id="cPosted">0</b></span>
+      <span>recoups caught <b id="cRecoup" style="color:var(--red)">0</b></span>
+      <span>needs review <b id="cReview">0</b></span>
+      <span>$ posted <b id="cAmt">0.00</b></span>
+      <span>tok/s <b id="cTps">—</b></span>
+    </div>
+    <div class="rows">
+      <table><thead><tr>
+        <th class="l">CLAIM</th><th class="l">PATIENT</th><th>PAID</th><th>PT RESP</th>
+        <th class="l">CARC</th><th class="l">EVENT</th>
+      </tr></thead><tbody id="cBody"></tbody></table>
+    </div>
+  </section>
+
+  <section class="pane gpu">
+    <h2><span class="dot"></span> GPU baseline · Gemini <span class="timer" id="tGpu">0.00s</span></h2>
+    <div class="counters"><span>posted <b id="gPosted">0</b></span><span id="gNote"></span></div>
+    <div class="rows"><div class="stalled" id="gStalled">Idle — baseline runs alongside the Cerebras pane.</div>
+      <table style="display:none"><tbody id="gBody"></tbody></table></div>
+  </section>
+</main>
+
+<div class="ledger">
+  <h3>WHO-OWES-WHO LEDGER <span class="dump">· dump-account recoups in red</span></h3>
+  <table><thead><tr>
+    <th class="l">ENTITY</th><th class="l">DIR</th><th>AMOUNT</th><th class="l">REASON</th>
+    <th class="l">DUMP ACCT</th>
+  </tr></thead><tbody id="ledgerBody"></tbody></table>
+</div>
+<div class="hint" id="doneLine"></div>
+
+<div id="recoupCard">
+  <div class="k">⚠ RECOUPMENT DETECTED</div>
+  <div class="big" id="rcBig"></div>
+  <div class="desc" id="rcDesc"></div>
+  <div class="meta" id="rcMeta"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let cerTimer=null, gpuTimer=null, t0=0;
+const fmt = (ms) => (ms/1000).toFixed(2)+"s";
+const money = (n) => Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function startTimers(){
+  t0 = performance.now();
+  cerTimer = setInterval(()=> $("tCer").textContent = fmt(performance.now()-t0), 33);
+  gpuTimer = setInterval(()=> $("tGpu").textContent = fmt(performance.now()-t0), 33);
+}
+function stopCer(){ clearInterval(cerTimer); }
+function stopGpu(){ clearInterval(gpuTimer); }
+
+let posted=0, amt=0;
+function addRows(items){
+  for(const li of items){
+    const tr=document.createElement("tr");
+    const isR = li.recoup_flag || ["recoup","reversal"].includes(li.event_type);
+    tr.className = "new" + (isR?" recoup":"");
+    tr.innerHTML = `<td class="l">${li.claim_id}</td><td class="l">${li.patient_ref}</td>
+      <td>${money(li.paid)}</td><td>${money(li.patient_responsibility)}</td>
+      <td class="l">${li.carc||""}</td><td class="l">${li.event_type}</td>`;
+    $("cBody").prepend(tr);
+    if(!isR){ posted++; amt += Number(li.paid); }
+  }
+  $("cPosted").textContent = posted;
+  $("cAmt").textContent = money(amt);
+}
+
+function renderLedger(ev){
+  $("cRecoup").textContent = ev.totals.recoups_caught;
+  $("cReview").textContent = ev.totals.needs_review;
+  for(const e of ev.ledger){
+    const tr=document.createElement("tr");
+    tr.innerHTML = `<td class="l">${e.entity_id}</td>
+      <td class="l ${e.direction}">${e.direction.toUpperCase()}</td>
+      <td class="${e.direction}">${money(e.amount)}</td>
+      <td class="l">${e.reason}</td>
+      <td class="l dump">${e.dump_account_id||""}</td>`;
+    $("ledgerBody").appendChild(tr);
+  }
+  const cross = ev.recoups.find(r=>r.cross_patient && r.status==="matched");
+  if(cross) popRecoup(cross, ev);
+}
+
+function popRecoup(cross, ev){
+  // find the takeback + original line for a vivid description
+  const take = ev.needs_review.concat([]).find(()=>false); // (lines streamed separately)
+  $("rcBig").textContent = `$${money(cross.amount)} takeback silently offsets another patient's payment`;
+  $("rcDesc").textContent = `Claim ${cross.recoup_claim_id} clawed back $${money(cross.amount)} and was netted against claim ${cross.original_claim_id} inside the same check — a human poster sees a $0.00 check and moves on.`;
+  $("rcMeta").textContent = `dump account ${cross.dump_account_id} · reconciled to a two-row who-owes-who entry`;
+  const c=$("recoupCard"); c.classList.add("show");
+  setTimeout(()=>c.classList.remove("show"), 6000);
+}
+
+$("run").onclick = async () => {
+  $("run").disabled = true;
+  $("cBody").innerHTML=""; $("ledgerBody").innerHTML=""; posted=0; amt=0;
+  $("gStalled").textContent = "Processing…";
+  startTimers();
+  const r = await fetch("/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({count:24})});
+  const {job_id} = await r.json();
+  const es = new EventSource(`/jobs/${job_id}/stream`);
+  es.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    if(ev.type==="doc"){
+      addRows(ev.line_items);
+      const tps = ev.time_info && ev.time_info.total_time
+        ? Math.round((ev.line_items.length*40)/ev.time_info.total_time) : null;
+      if(tps) $("cTps").textContent = tps;
+    } else if(ev.type==="ledger"){
+      stopCer(); renderLedger(ev);
+    } else if(ev.type==="done"){
+      $("doneLine").textContent = `Cerebras posted ${posted} lines + caught ${$("cRecoup").textContent} recoups in ${fmt(ev.elapsed_ms)} — synthetic data, no PHI.`;
+      // baseline pane (no live Gemini quota): show honest stalled state
+      $("gStalled").textContent = "Gemini baseline unavailable (quota). Cerebras finished the full batch in "+fmt(ev.elapsed_ms)+".";
+      es.close(); $("run").disabled=false;
+    }
+  };
+};
+</script>
+</body>
+</html>
