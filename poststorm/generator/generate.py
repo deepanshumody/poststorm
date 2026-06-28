@@ -79,10 +79,19 @@ def draw_eob(case) -> Image.Image:
 
 
 def scannify(img: Image.Image, seed: int) -> Image.Image:
-    rng = random.Random(seed)
-    img = img.rotate(rng.uniform(-1.3, 1.3), expand=True, fillcolor="white")
-    img = img.convert("L").filter(ImageFilter.GaussianBlur(rng.uniform(0.3, 0.7)))
-    return img.convert("RGB")
+    # Photocopier feel, but NO rotation so detection bands map to exact rows.
+    g = img.convert("L").filter(ImageFilter.GaussianBlur(0.5))
+    noise = Image.effect_noise(g.size, 14)
+    g = Image.blend(g, noise, 0.05)
+    return g.convert("RGB")
+
+
+def recoup_box(case) -> dict | None:
+    """Fractional bbox of the planted recoup row (recoup line is appended last)."""
+    if not case["has_planted_recoup"]:
+        return None
+    row_top = 300 + (len(case["lines"]) - 1) * 64
+    return {"x": 56 / W, "y": (row_top - 6) / H, "w": (W - 112) / W, "h": 72 / H}
 
 
 def save_pdf(img: Image.Image, path: Path):
@@ -104,8 +113,14 @@ def main(n=24, recoup_cases=3, seed=7):
         img = scannify(draw_eob(c), seed + i)
         img.save(OUT / "eobs" / f"{c['doc_id']}.png")
         save_pdf(img, OUT / "eobs" / f"{c['doc_id']}.pdf")
-        truth.append({"doc_id": c["doc_id"], "has_planted_recoup": c["has_planted_recoup"],
-                      "lines": c["lines"]})
+        rline = c["lines"][-1] if c["has_planted_recoup"] else None
+        truth.append({
+            "doc_id": c["doc_id"], "has_planted_recoup": c["has_planted_recoup"],
+            "payer": c["payer"], "check_number": c["check_number"],
+            "recoup_box": recoup_box(c),
+            "recoup_text": (f"{rline['patient_ref']}  {rline['paid']:.2f}" if rline else None),
+            "lines": c["lines"],
+        })
     (OUT / "ground_truth.json").write_text(json.dumps(truth, indent=2))
     planted = sum(1 for t in truth if t["has_planted_recoup"])
     print(f"Generated {len(cases)} EOBs ({planted} with planted recoups) -> {OUT/'eobs'}")
