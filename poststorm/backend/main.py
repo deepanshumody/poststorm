@@ -36,14 +36,15 @@ def index():
 def create_job(body: dict | None = None):
     body = body or {}
     n = int(body.get("count", 24))
-    paths = sorted(glob.glob(str(EOBS / "*.png")))[:n]
+    paths = [p for p in sorted(glob.glob(str(EOBS / "*.png"))) if ".thumb." not in Path(p).name][:n]
     meta = _doc_meta()
     docs = []
     for i, p in enumerate(paths):
         doc_id = Path(p).stem
         m = meta.get(doc_id, {})
         docs.append({
-            "idx": i, "doc_id": doc_id, "img": f"/eobs/{doc_id}.png",
+            "idx": i, "doc_id": doc_id,
+            "img": f"/eobs/{doc_id}.png", "thumb": f"/eobs/{doc_id}.thumb.png",
             "has_recoup": m.get("has_planted_recoup", False),
             "recoup_box": m.get("recoup_box"),
             "recoup_text": m.get("recoup_text"),
@@ -67,4 +68,5 @@ async def stream(jid: str):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "docs": len(glob.glob(str(EOBS / "*.png")))}
+    full = [p for p in glob.glob(str(EOBS / "*.png")) if ".thumb." not in Path(p).name]
+    return {"ok": True, "docs": len(full)}

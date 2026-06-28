@@ -81,7 +81,7 @@
     letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
   .wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:10px}
   .doc{position:relative;aspect-ratio:1700/2200;border-radius:5px;overflow:hidden;background:#0c111c;
-    border:1px solid #20293d;opacity:.32;filter:grayscale(1) brightness(.8);transition:.45s ease}
+    border:1px solid #20293d;opacity:.5;filter:grayscale(.85) brightness(.92);transition:.45s ease}
   .doc img{width:100%;height:100%;object-fit:cover;object-position:top}
   .doc .ring{position:absolute;inset:0;border-radius:5px;border:2px solid transparent}
   .doc.lit{opacity:1;filter:none}
@@ -214,7 +214,7 @@ function buildWall(docs){
   for(const d of docs){
     docsById[d.doc_id]=d;
     const el=document.createElement("div"); el.className="doc"; el.id="w_"+d.doc_id;
-    el.innerHTML=`<img src="${d.img}" alt=""><div class="scanline"></div><div class="ring"></div><div class="stamp">RECOUP</div>`;
+    el.innerHTML=`<img src="${d.thumb||d.img}" alt="" loading="eager"><div class="scanline"></div><div class="ring"></div><div class="stamp">RECOUP</div>`;
     $("wall").appendChild(el);
   }
 }

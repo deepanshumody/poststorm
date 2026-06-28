@@ -113,6 +113,9 @@ def main(n=24, recoup_cases=3, seed=7):
         img = scannify(draw_eob(c), seed + i)
         img.save(OUT / "eobs" / f"{c['doc_id']}.png")
         save_pdf(img, OUT / "eobs" / f"{c['doc_id']}.pdf")
+        thumb = img.copy()
+        thumb.thumbnail((260, 340))
+        thumb.save(OUT / "eobs" / f"{c['doc_id']}.thumb.png")
         rline = c["lines"][-1] if c["has_planted_recoup"] else None
         truth.append({
             "doc_id": c["doc_id"], "has_planted_recoup": c["has_planted_recoup"],

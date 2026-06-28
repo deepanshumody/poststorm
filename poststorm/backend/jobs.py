@@ -33,7 +33,7 @@ async def run_job(paths: list[str]):
     errors = 0
     for fut in asyncio.as_completed(tasks):
         path, idx, res, err = await fut
-        doc_id = path.replace("\\", "/").split("/")[-1]
+        doc_id = path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]  # stem, matches /jobs docs
         if err is not None:
             errors += 1
             yield {"type": "doc", "doc_id": doc_id, "idx": idx,
