@@ -6,215 +6,266 @@
 <title>PostStorm — Lockbox-to-Ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#080b12; --ink2:#0f1422; --ink3:#161d2e; --line:#1f2940;
-    --paper:#f3ead6; --paper2:#e7dcc1; --paper-ink:#2a2419;
-    --beam:#36e6d9; --beam-soft:rgba(54,230,217,.16);
-    --credit:#54d36a; --recoup:#ff4d6d; --gold:#f5c451;
-    --fg:#eaf0fb; --dim:#7e8aa6;
-    --disp:'Space Grotesk',system-ui,-apple-system,Segoe UI,sans-serif;
-    --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+    --bg:#0a0c10; --surface:#11141b; --surface2:#161a22; --raised:#1b202a;
+    --border:#242a36; --border2:#2f3644;
+    --fg:#e7ebf1; --dim:#98a2b3; --faint:#5e6878;
+    --accent:#2dd4bf; --accent-d:#155e54;
+    --paper:#efe7d4; --pos:#3fb950; --neg:#f85149; --warn:#d6a528; --gem:#7c89b8;
+    --ui:'Inter',system-ui,-apple-system,Segoe UI,sans-serif;
+    --disp:'Space Grotesk',var(--ui); --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+    --r:10px; --r-lg:14px; --sh:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.22);
   }
   *{box-sizing:border-box}
   html,body{margin:0}
-  body{background:
-      radial-gradient(1200px 600px at 80% -10%, #0d1626 0%, transparent 60%),
-      var(--ink);
-    color:var(--fg);font-family:var(--disp);-webkit-font-smoothing:antialiased}
+  body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.45;
+    -webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh)}
 
-  header{display:flex;align-items:baseline;gap:14px;padding:18px 26px;border-bottom:1px solid var(--line)}
-  header .logo{font-weight:700;font-size:19px;letter-spacing:.2px}
-  header .logo small{color:var(--dim);font-weight:500}
-  header .tag{color:var(--dim);font-size:13px}
-  header .right{margin-left:auto;display:flex;align-items:center;gap:14px}
-  .nophi{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--gold);
-    border:1px solid #3a2f12;background:#191305;padding:4px 9px;border-radius:6px}
-  button#run{font-family:var(--disp);font-weight:700;font-size:14px;border:0;cursor:pointer;
-    color:#042c2a;background:linear-gradient(180deg,#4ff0e3,#26c8bd);padding:11px 20px;border-radius:9px;
-    box-shadow:0 6px 22px rgba(54,230,217,.28)}
-  button#run:disabled{filter:saturate(.4) brightness(.8);cursor:default;box-shadow:none}
+  /* topbar */
+  .topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg,#0e1118,#0a0c10)}
+  .mark{width:26px;height:26px;border-radius:7px;background:conic-gradient(from 200deg,var(--accent),#1b9c8e 60%,#0e6c61);
+    box-shadow:0 0 0 1px #0a0c10,0 0 16px rgba(45,212,191,.35);position:relative;flex:0 0 auto}
+  .mark::after{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;background:#06231f;border-radius:2px;
+    box-shadow:0 -5px 0 #06231f,0 5px 0 #06231f}
+  .brand{font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:.2px}
+  .brand span{color:var(--dim);font-weight:500}
+  .topbar .sub{color:var(--faint);font-size:12.5px}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .pill{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--warn);
+    border:1px solid #3a3016;background:#1a1408;padding:5px 10px;border-radius:99px}
+  .pill .d{width:6px;height:6px;border-radius:50%;background:var(--warn);display:inline-block;margin-right:6px;vertical-align:1px}
+  button#run{font-family:var(--ui);font-weight:600;font-size:13.5px;color:#04231f;cursor:pointer;border:0;
+    background:linear-gradient(180deg,#3fe9d6,#23bdad);padding:10px 18px;border-radius:9px;
+    box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 6px 18px rgba(45,212,191,.25)}
+  button#run:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button#run:disabled{filter:saturate(.35) brightness(.78);cursor:default;box-shadow:none}
 
-  .stage{display:grid;grid-template-columns:300px 1fr;gap:18px;padding:18px 22px}
+  .wrap{padding:18px 22px;display:flex;flex-direction:column;gap:18px;max-width:1400px;margin:0 auto}
 
-  /* ---------- signature: the reading head ---------- */
-  .reader{background:linear-gradient(180deg,var(--ink2),#0b0f1a);border:1px solid var(--line);
-    border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
-  .reader .now{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;color:var(--beam)}
-  .frame{position:relative;width:100%;aspect-ratio:1700/2200;border-radius:8px;overflow:hidden;
-    background:var(--paper);box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 0 1px #0006 inset}
-  .frame.empty{background:#0c111c;border:1px dashed #233049}
-  .frame .page{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;
-    filter:contrast(1.04) brightness(1.02)}
-  .frame .beam{position:absolute;left:0;right:0;height:26%;top:-30%;pointer-events:none;
-    background:linear-gradient(180deg,transparent,var(--beam-soft) 60%,rgba(54,230,217,.55));
-    border-bottom:2px solid var(--beam);box-shadow:0 0 24px 4px var(--beam-soft);opacity:0}
-  .frame.scanning .beam{opacity:1;animation:sweep 1.05s cubic-bezier(.5,0,.5,1) 1}
+  /* race */
+  .race{padding:18px 20px}
+  .race .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .race .hd h2{font-family:var(--disp);font-size:15px;margin:0;font-weight:600}
+  .lane{margin:13px 0}
+  .lane .meta{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .lane .prov{font-size:13px;font-weight:600}
+  .lane .prov small{color:var(--faint);font-weight:500;margin-left:8px;font-size:11.5px}
+  .lane .stat{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
+  .lane .stat b{color:var(--fg);font-weight:600}
+  .track{position:relative;height:26px;background:var(--surface2);border:1px solid var(--border);
+    border-radius:7px;overflow:hidden}
+  .fill{position:absolute;inset:0 100% 0 0;border-radius:7px 0 0 7px;transition:right .35s cubic-bezier(.4,0,.2,1)}
+  .cer .fill{background:linear-gradient(90deg,#0e6c61,var(--accent))}
+  .gem .fill{background:linear-gradient(90deg,#3a4566,var(--gem))}
+  .track .lbl{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-family:var(--mono);
+    font-size:11.5px;color:var(--fg);font-weight:600;z-index:2}
+  .verdict{margin-top:14px;padding:12px 15px;border:1px solid var(--accent-d);border-radius:var(--r);
+    background:linear-gradient(180deg,rgba(45,212,191,.08),rgba(45,212,191,.02));font-size:13.5px;color:var(--dim);
+    display:none}
+  .verdict.show{display:block}
+  .verdict b{color:var(--accent);font-family:var(--disp)}
+
+  /* stage: reader + dash */
+  .stage{display:grid;grid-template-columns:300px 1fr;gap:18px}
+  .pane{padding:16px}
+  .pane > .eyebrow{display:block;margin-bottom:12px}
+  .frame{position:relative;width:100%;aspect-ratio:1700/2200;border-radius:8px;overflow:hidden;background:var(--paper);
+    box-shadow:0 8px 26px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.4) inset}
+  .frame.empty{background:#0c1018;border:1px dashed var(--border2);box-shadow:none}
+  .frame .page{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top}
+  .frame .beam{position:absolute;left:0;right:0;height:24%;top:-30%;pointer-events:none;opacity:0;
+    background:linear-gradient(180deg,transparent,rgba(45,212,191,.16) 60%,rgba(45,212,191,.5));
+    border-bottom:2px solid var(--accent);box-shadow:0 0 22px 3px rgba(45,212,191,.25)}
+  .frame.scanning .beam{opacity:1;animation:sweep 1s cubic-bezier(.5,0,.5,1) 1}
   @keyframes sweep{from{top:-30%}to{top:104%}}
-  .frame .band{position:absolute;border:2px solid var(--recoup);border-radius:4px;opacity:0;
-    box-shadow:0 0 0 9999px rgba(8,4,8,.0),0 0 22px rgba(255,77,109,.6);background:rgba(255,77,109,.14)}
-  .frame .band.on{opacity:1;animation:bandpop .4s ease-out}
-  .frame .band .lbl{position:absolute;top:-22px;left:-1px;font-family:var(--mono);font-size:10px;
-    letter-spacing:.12em;color:#fff;background:var(--recoup);padding:2px 7px;border-radius:4px;white-space:nowrap}
-  @keyframes bandpop{from{transform:scale(1.06);opacity:0}to{transform:scale(1);opacity:1}}
-  .reader .docname{font-family:var(--mono);font-size:12px;color:var(--fg)}
-  .reader .docname b{color:var(--beam)}
-  .chips{display:flex;flex-direction:column;gap:5px;min-height:74px}
-  .chip{font-family:var(--mono);font-size:11px;color:var(--paper-ink);background:var(--paper);
-    border-radius:5px;padding:4px 8px;display:flex;justify-content:space-between;gap:10px;
-    animation:chipin .3s ease-out;border-left:3px solid var(--credit)}
-  .chip.r{border-left-color:var(--recoup);color:#5a1322;background:#ffd9df}
-  @keyframes chipin{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+  .frame .band{position:absolute;border:2px solid var(--neg);border-radius:3px;opacity:0;
+    background:rgba(248,81,73,.13);box-shadow:0 0 18px rgba(248,81,73,.5)}
+  .frame .band.on{opacity:1;animation:bandpop .35s ease-out}
+  .frame .band .l{position:absolute;top:-21px;left:-1px;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+    color:#fff;background:var(--neg);padding:2px 7px;border-radius:4px;white-space:nowrap}
+  @keyframes bandpop{from{transform:scale(1.05);opacity:0}to{transform:scale(1);opacity:1}}
+  .docname{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .docname b{color:var(--accent)}
+  .chips{margin-top:10px;display:flex;flex-direction:column;gap:5px;min-height:70px}
+  .chip{font-family:var(--mono);font-size:11px;color:#33301f;background:var(--paper);border-radius:5px;
+    padding:4px 9px;display:flex;justify-content:space-between;gap:10px;border-left:3px solid var(--pos);
+    animation:slidein .28s ease-out}
+  .chip.r{border-left-color:var(--neg);background:#f6dcde;color:#5a1620}
+  @keyframes slidein{from{opacity:0;transform:translateX(7px)}to{opacity:1;transform:none}}
 
-  /* ---------- dashboard: metrics + wall ---------- */
   .dash{display:flex;flex-direction:column;gap:14px}
   .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .metric{background:var(--ink2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-  .metric .v{font-family:var(--mono);font-weight:600;font-size:30px;line-height:1;letter-spacing:.5px}
-  .metric .v small{font-size:15px;color:var(--dim)}
-  .metric .k{margin-top:7px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
-  .metric.read .v{color:var(--beam)} .metric.recoups .v{color:var(--recoup)}
-
-  .wallwrap{background:var(--ink2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;flex:1}
-  .wallwrap .h{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--dim);
-    letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
-  .wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:10px}
-  .doc{position:relative;aspect-ratio:1700/2200;border-radius:5px;overflow:hidden;background:#0c111c;
-    border:1px solid #20293d;opacity:.5;filter:grayscale(.85) brightness(.92);transition:.45s ease}
+  .tile{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px}
+  .tile .v{font-family:var(--disp);font-weight:600;font-size:27px;line-height:1;font-variant-numeric:tabular-nums}
+  .tile .v small{font-size:14px;color:var(--faint);font-weight:500}
+  .tile.rec .v{color:var(--neg)} .tile.amt .v{color:var(--pos)}
+  .tile .k{margin-top:7px;font-size:11px;color:var(--dim)}
+  .wallcard{flex:1;padding:14px 16px}
+  .wallcard .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .wallcard .eyebrow .n{margin-left:auto;font-family:var(--mono);color:var(--dim);text-transform:none;letter-spacing:0}
+  .wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(56px,1fr));gap:9px}
+  .doc{position:relative;aspect-ratio:1700/2200;border-radius:5px;overflow:hidden;background:#0c1018;
+    border:1px solid var(--border);opacity:.5;filter:grayscale(.85) brightness(.92);transition:.4s ease}
   .doc img{width:100%;height:100%;object-fit:cover;object-position:top}
-  .doc .ring{position:absolute;inset:0;border-radius:5px;border:2px solid transparent}
-  .doc.lit{opacity:1;filter:none}
-  .doc.lit .ring{border-color:var(--credit);box-shadow:0 0 14px rgba(84,211,106,.45)}
-  .doc.lit.r .ring{border-color:var(--recoup);box-shadow:0 0 16px rgba(255,77,109,.6);animation:rpulse 1.2s ease-out 2}
-  .doc .stamp{position:absolute;bottom:3px;left:3px;right:3px;font-family:var(--mono);font-size:8px;
-    letter-spacing:.1em;text-align:center;color:#fff;background:var(--recoup);border-radius:3px;
-    padding:1px 0;opacity:0}
-  .doc.lit.r .stamp{opacity:1}
-  @keyframes rpulse{0%{box-shadow:0 0 0 0 rgba(255,77,109,.6)}100%{box-shadow:0 0 0 10px rgba(255,77,109,0)}}
-  .scanline{position:absolute;left:0;right:0;height:3px;background:var(--beam);box-shadow:0 0 10px 2px var(--beam);opacity:0}
-  .doc.scanning{opacity:.85;filter:grayscale(.4)}
-  .doc.scanning .scanline{opacity:1;animation:dsweep .9s linear 1}
+  .doc .ring{position:absolute;inset:0;border-radius:5px;border:1.5px solid transparent}
+  .doc .scan{position:absolute;left:0;right:0;height:2px;background:var(--accent);box-shadow:0 0 8px var(--accent);opacity:0}
+  .doc.scanning{opacity:.9;filter:grayscale(.3)}
+  .doc.scanning .scan{opacity:1;animation:dsweep .85s linear 1}
   @keyframes dsweep{from{top:0}to{top:100%}}
+  .doc.lit{opacity:1;filter:none}
+  .doc.lit .ring{border-color:var(--pos)}
+  .doc.lit.r .ring{border-color:var(--neg);box-shadow:0 0 14px rgba(248,81,73,.55) inset}
+  .doc .stamp{position:absolute;bottom:3px;left:3px;right:3px;font-family:var(--mono);font-size:7.5px;
+    letter-spacing:.08em;text-align:center;color:#fff;background:var(--neg);border-radius:3px;opacity:0}
+  .doc.lit.r .stamp{opacity:1}
 
-  /* ---------- data tables ---------- */
-  .data{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:0 22px 26px}
-  .panel{background:var(--ink2);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-height:240px}
-  .panel h3{margin:0;padding:12px 16px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;
-    color:var(--dim);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
-  .panel .body{overflow:auto;max-height:42vh}
-  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
-  th{position:sticky;top:0;background:var(--ink3);color:var(--dim);font-weight:500;text-align:right;
-    padding:7px 12px;font-size:10.5px;letter-spacing:.05em;border-bottom:1px solid var(--line)}
+  /* data tables */
+  .data{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .panel{overflow:hidden;display:flex;flex-direction:column;min-height:240px}
+  .panel h3{margin:0;padding:13px 16px;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dim);border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+  .panel h3 .r{margin-left:auto;color:var(--warn);font-weight:500;letter-spacing:0;text-transform:none;font-size:11.5px}
+  .panel h3 .c{margin-left:auto;color:var(--faint);font-weight:500;letter-spacing:0;text-transform:none;font-family:var(--mono)}
+  .scroll{overflow:auto;max-height:44vh}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+  th{position:sticky;top:0;background:var(--surface2);color:var(--faint);font-weight:500;text-align:right;
+    padding:8px 14px;font-size:10.5px;letter-spacing:.04em;border-bottom:1px solid var(--border)}
   th.l,td.l{text-align:left}
-  td{padding:6px 12px;text-align:right;border-bottom:1px solid #131a29;white-space:nowrap}
+  td{padding:7px 14px;text-align:right;border-bottom:1px solid #131824;color:var(--dim)}
+  tbody tr:hover td{background:rgba(255,255,255,.015)}
+  td.k{color:var(--fg)}
   tr.in td{animation:rowin .5s ease-out}
-  @keyframes rowin{from{background:#10271f}to{background:transparent}}
-  tr.r td{color:var(--recoup);font-weight:600}
-  td.credit{color:var(--credit)} td.debit{color:var(--recoup);font-weight:600}
-  td.dump{color:var(--gold)}
-  .empty{color:var(--dim);text-align:center;padding:34px;font-size:13px}
+  @keyframes rowin{from{background:rgba(63,185,80,.1)}to{background:transparent}}
+  tr.r td{color:var(--neg)}
+  td.credit{color:var(--pos)} td.debit{color:var(--neg)} td.dump{color:var(--warn)}
+  .empty{color:var(--faint);text-align:center;padding:34px;font-size:13px}
 
-  /* ---------- climax ---------- */
-  #climax{position:fixed;inset:0;background:rgba(4,6,11,.72);backdrop-filter:blur(3px);
-    display:none;align-items:center;justify-content:center;z-index:60}
-  #climax.show{display:flex;animation:fade .35s ease-out}
+  /* climax */
+  #climax{position:fixed;inset:0;background:rgba(6,8,12,.74);backdrop-filter:blur(4px);display:none;
+    align-items:center;justify-content:center;z-index:60;padding:24px}
+  #climax.show{display:flex;animation:fade .3s ease-out}
   @keyframes fade{from{opacity:0}to{opacity:1}}
-  .cx{display:grid;grid-template-columns:240px 1fr;gap:26px;max-width:760px;
-    background:linear-gradient(160deg,#1a1016,#0c0a10);border:1px solid #3a1622;border-radius:18px;
-    padding:26px;box-shadow:0 30px 90px rgba(255,77,109,.22)}
-  .cx .frame{box-shadow:0 14px 40px rgba(0,0,0,.6)}
-  .cx .k{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--recoup)}
-  .cx h2{font-size:25px;margin:8px 0 12px;line-height:1.25}
-  .cx p{color:#f0cdd4;font-size:14.5px;line-height:1.6;margin:0 0 14px}
-  .cx .led{font-family:var(--mono);font-size:12px;color:var(--dim);border-top:1px solid #3a1622;padding-top:12px}
-  .cx .led b{color:var(--credit)} .cx .led .d{color:var(--recoup)}
-  .cx .close{margin-top:16px;font-size:12px;color:var(--dim);cursor:pointer}
+  .cx{display:grid;grid-template-columns:230px 1fr;gap:26px;max-width:740px;background:var(--surface);
+    border:1px solid #3a2026;border-radius:18px;padding:26px;box-shadow:0 30px 90px rgba(0,0,0,.6)}
+  .cx .frame{box-shadow:0 14px 40px rgba(0,0,0,.55)}
+  .cx .k{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--neg)}
+  .cx h2{font-family:var(--disp);font-size:23px;margin:9px 0 12px;line-height:1.25}
+  .cx p{color:#e9c8cd;font-size:14px;line-height:1.6;margin:0 0 14px}
+  .cx .led{font-family:var(--mono);font-size:12px;color:var(--dim);border-top:1px solid #2a1a1e;padding-top:12px}
+  .cx .led b{color:var(--pos)} .cx .led .d{color:var(--neg)}
+  .cx .x{margin-top:16px;font-size:12px;color:var(--faint);cursor:pointer}
+  .cx .x:hover{color:var(--dim)}
 
-  @media (prefers-reduced-motion: reduce){
-    .frame.scanning .beam,.doc.scanning .scanline,.doc.lit.r .ring{animation:none}
-  }
+  @media (max-width:980px){.stage{grid-template-columns:1fr}.data{grid-template-columns:1fr}}
+  @media (prefers-reduced-motion:reduce){.frame.scanning .beam,.doc.scanning .scan{animation:none}}
 </style>
 </head>
 <body>
-<header>
-  <span class="logo">PostStorm <small>· Lockbox-to-Ledger</small></span>
-  <span class="tag">Gemma-4 31B reads scanned paper EOBs · Cerebras posts the batch in seconds</span>
+<div class="topbar">
+  <span class="mark"></span>
+  <span class="brand">PostStorm <span>· Lockbox-to-Ledger</span></span>
+  <span class="sub">Gemma-4 31B reads scanned paper EOBs — posted &amp; reconciled in seconds on Cerebras</span>
   <span class="right">
-    <span class="nophi">SYNTHETIC · NO PHI</span>
+    <span class="pill"><span class="d"></span>SYNTHETIC · NO PHI</span>
     <button id="run">▶ Read EOB batch</button>
   </span>
-</header>
+</div>
 
-<section class="stage">
-  <div class="reader">
-    <div class="now">⟢ NOW READING</div>
-    <div class="frame empty" id="frame">
-      <img class="page" id="page" alt="" style="display:none">
-      <div class="beam"></div>
-      <div class="band" id="band"><span class="lbl">⚠ RECOUPMENT</span></div>
+<div class="wrap">
+
+  <section class="card race">
+    <div class="hd"><h2>Speed — same task, same images</h2><span class="eyebrow">multimodal extraction · reasoning off both sides</span></div>
+    <div class="lane cer">
+      <div class="meta"><span class="prov">Cerebras <small>Gemma-4 31B</small></span>
+        <span class="stat"><b id="cerTimer" class="mono">0.00s</b> · <span id="cerTps" class="mono">— tok/s</span></span></div>
+      <div class="track"><div class="fill" id="cerFill"></div><span class="lbl" id="cerCount">0 / 0</span></div>
     </div>
-    <div class="docname" id="docname">Idle — press <b>Read EOB batch</b></div>
-    <div class="chips" id="chips"></div>
+    <div class="lane gem">
+      <div class="meta"><span class="prov">Google <small>Gemini 2.5 Flash · GPU baseline</small></span>
+        <span class="stat"><b id="gemTimer" class="mono">0.00s</b> · <span id="gemRate" class="mono">—</span></span></div>
+      <div class="track"><div class="fill" id="gemFill"></div><span class="lbl" id="gemCount">0 / 0</span></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </section>
+
+  <div class="stage">
+    <section class="card pane reader">
+      <span class="eyebrow">⟢ Now reading</span>
+      <div class="frame empty" id="frame">
+        <img class="page" id="page" alt="" style="display:none">
+        <div class="beam"></div>
+        <div class="band" id="band"><span class="l">⚠ RECOUPMENT</span></div>
+      </div>
+      <div class="docname" id="docname">Idle — press <b>Read EOB batch</b></div>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <section class="dash">
+      <div class="metrics">
+        <div class="tile"><div class="v" id="mLines">0</div><div class="k">Lines posted</div></div>
+        <div class="tile rec"><div class="v" id="mRecoup">0</div><div class="k">Recoupments caught</div></div>
+        <div class="tile amt"><div class="v" id="mAmt"><small>$</small>0</div><div class="k">Posted to ledger</div></div>
+      </div>
+      <div class="card wallcard">
+        <div class="eyebrow">◳ Batch wall <span class="n" id="wallN"></span></div>
+        <div class="wall" id="wall"></div>
+      </div>
+    </section>
   </div>
 
-  <div class="dash">
-    <div class="metrics">
-      <div class="metric read"><div class="v"><span id="detCount">0</span><small>/<span id="detTotal">0</span></small></div><div class="k">Documents read</div></div>
-      <div class="metric"><div class="v" id="timer">0.00<small>s</small></div><div class="k">Elapsed · Cerebras</div></div>
-      <div class="metric recoups"><div class="v" id="recoupCount">0</div><div class="k">Recoupments caught</div></div>
-    </div>
-    <div class="wallwrap">
-      <div class="h">◳ Batch wall · documents ignite as Gemma reads them <span id="amt" style="margin-left:auto;font-family:var(--mono);color:var(--credit)"></span></div>
-      <div class="wall" id="wall"></div>
-    </div>
+  <div class="data">
+    <section class="card panel">
+      <h3>Posted lines <span class="c" id="postedN"></span></h3>
+      <div class="scroll"><table><thead><tr><th class="l">claim</th><th class="l">patient</th><th>paid</th><th>pt resp</th><th class="l">carc</th><th class="l">event</th></tr></thead>
+        <tbody id="postBody"><tr><td class="empty" colspan="6">Run the batch to post lines.</td></tr></tbody></table></div>
+    </section>
+    <section class="card panel">
+      <h3>Who-owes-who ledger <span class="r">dump-account recoups in red</span></h3>
+      <div class="scroll"><table><thead><tr><th class="l">entity</th><th class="l">dir</th><th>amount</th><th class="l">reason</th><th class="l">dump acct</th></tr></thead>
+        <tbody id="ledgerBody"><tr><td class="empty" colspan="5">Ledger builds after the batch is read.</td></tr></tbody></table></div>
+    </section>
   </div>
-</section>
-
-<section class="data">
-  <div class="panel">
-    <h3>Posted lines <span style="margin-left:auto;color:var(--dim)" id="postedN"></span></h3>
-    <div class="body">
-      <table><thead><tr><th class="l">claim</th><th class="l">patient</th><th>paid</th><th>pt resp</th><th class="l">carc</th><th class="l">event</th></tr></thead>
-      <tbody id="postBody"><tr><td class="empty" colspan="6">Run the batch to post lines.</td></tr></tbody></table>
-    </div>
-  </div>
-  <div class="panel">
-    <h3>Who-owes-who ledger <span class="dump" style="margin-left:auto">dump-account recoups in red</span></h3>
-    <div class="body">
-      <table><thead><tr><th class="l">entity</th><th class="l">dir</th><th>amount</th><th class="l">reason</th><th class="l">dump acct</th></tr></thead>
-      <tbody id="ledgerBody"><tr><td class="empty" colspan="5">Ledger builds after the batch is read.</td></tr></tbody></table>
-    </div>
-  </div>
-</section>
+</div>
 
 <div id="climax"></div>
 
 <script>
 const $=(id)=>document.getElementById(id);
 const money=(n)=>Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-const PACE=180;
+const PACE=170;
 
-let docsById={}, claimToDoc={}, pending=[], featured=0, total=0;
-let posted=0, amt=0, recoupsLive=0, ledgerData=null, doneElapsed=null, climaxed=false;
-let t0=0, timerIv=null, pumpIv=null;
+let docsById={}, claimToDoc={}, pending=[], total=0;
+let cerSeen=0, gemSeen=0, posted=0, amt=0, recoupsLive=0;
+let sumCt=0, sumCt_t=0, gemLat=[], ledgerData=null, climaxed=false;
+let t0=0, cerTimerIv=null, gemTimerIv=null, pumpIv=null, cerFrozen=false;
 
 function reset(){
-  docsById={}; claimToDoc={}; pending=[]; featured=0; posted=0; amt=0; recoupsLive=0;
-  ledgerData=null; doneElapsed=null; climaxed=false;
-  $("wall").innerHTML=""; $("chips").innerHTML=""; $("postBody").innerHTML="";
-  $("ledgerBody").innerHTML=""; $("amt").textContent=""; $("postedN").textContent="";
-  $("detCount").textContent="0"; $("recoupCount").textContent="0";
-  $("climax").classList.remove("show"); $("band").classList.remove("on");
-  $("page").style.display="none"; $("frame").classList.add("empty");
+  docsById={}; claimToDoc={}; pending=[]; cerSeen=0; gemSeen=0; posted=0; amt=0; recoupsLive=0;
+  sumCt=0; sumCt_t=0; gemLat=[]; ledgerData=null; climaxed=false; cerFrozen=false;
+  ["wall","chips","postBody","ledgerBody"].forEach(id=>$(id).innerHTML="");
+  $("postBody").innerHTML='<tr><td class="empty" colspan="6">Reading…</td></tr>';
+  $("mLines").textContent="0"; $("mRecoup").textContent="0"; $("mAmt").innerHTML="<small>$</small>0";
+  $("cerCount").textContent="0 / 0"; $("gemCount").textContent="0 / 0";
+  $("cerFill").style.right="100%"; $("gemFill").style.right="100%";
+  $("cerTps").textContent="— tok/s"; $("gemRate").textContent="—";
+  $("verdict").classList.remove("show"); $("climax").classList.remove("show");
+  $("band").classList.remove("on"); $("page").style.display="none"; $("frame").classList.add("empty");
 }
 
 function buildWall(docs){
-  total=docs.length; $("detTotal").textContent=total;
+  total=docs.length;
+  $("cerCount").textContent="0 / "+total; $("gemCount").textContent="0 / "+total;
+  $("wallN").textContent=total+" documents";
   for(const d of docs){
     docsById[d.doc_id]=d;
     const el=document.createElement("div"); el.className="doc"; el.id="w_"+d.doc_id;
-    el.innerHTML=`<img src="${d.thumb||d.img}" alt="" loading="eager"><div class="scanline"></div><div class="ring"></div><div class="stamp">RECOUP</div>`;
+    el.innerHTML=`<img src="${d.thumb||d.img}" alt="" loading="eager"><div class="scan"></div><div class="ring"></div><div class="stamp">RECOUP</div>`;
     $("wall").appendChild(el);
   }
 }
@@ -224,11 +275,8 @@ function featureDoc(ev){
   $("frame").classList.remove("empty");
   const pg=$("page"); pg.style.display="block"; pg.src=meta.img||"";
   $("docname").innerHTML=`<b>${ev.doc_id}</b> · ${meta.payer||""}`;
-  // restart beam
   const fr=$("frame"); fr.classList.remove("scanning"); void fr.offsetWidth; fr.classList.add("scanning");
-  // extracted chips
-  const chips=$("chips"); chips.innerHTML="";
-  let hasR=false;
+  const chips=$("chips"); chips.innerHTML=""; let hasR=false;
   for(const li of ev.line_items){
     const isR=li.recoup_flag||["recoup","reversal"].includes(li.event_type);
     hasR=hasR||isR; claimToDoc[li.claim_id]=ev.doc_id;
@@ -238,94 +286,113 @@ function featureDoc(ev){
     if(!isR){ posted++; amt+=Number(li.paid); }
     addPostRow(li,isR);
   }
-  // detection band for recoup docs
   const band=$("band"); band.classList.remove("on");
   if(meta.has_recoup && meta.recoup_box){
     const b=meta.recoup_box;
-    band.style.left=(b.x*100)+"%"; band.style.top=(b.y*100)+"%";
-    band.style.width=(b.w*100)+"%"; band.style.height=(b.h*100)+"%";
-    setTimeout(()=>band.classList.add("on"),430);
-    recoupsLive++; $("recoupCount").textContent=recoupsLive;
+    band.style.left=(b.x*100)+"%"; band.style.top=(b.y*100)+"%"; band.style.width=(b.w*100)+"%"; band.style.height=(b.h*100)+"%";
+    setTimeout(()=>band.classList.add("on"),420);
+    recoupsLive++; $("mRecoup").textContent=recoupsLive;
   }
-  // wall chip
   const w=$("w_"+ev.doc_id);
-  if(w){ w.classList.add("scanning"); setTimeout(()=>{w.classList.remove("scanning");w.classList.add("lit");if(hasR)w.classList.add("r");},700); }
-  featured++; $("detCount").textContent=featured;
-  $("amt").textContent="$"+money(amt)+" posted";
+  if(w){ w.classList.add("scanning"); setTimeout(()=>{w.classList.remove("scanning");w.classList.add("lit");if(hasR)w.classList.add("r");},680); }
+  cerSeen++; advanceCer();
+  $("mLines").textContent=posted; $("mAmt").innerHTML="<small>$</small>"+money(amt);
   $("postedN").textContent=posted+" lines";
 }
 
+function advanceCer(){
+  $("cerCount").textContent=cerSeen+" / "+total;
+  $("cerFill").style.right=(100-100*cerSeen/total)+"%";
+}
+
 function addPostRow(li,isR){
-  const b=$("postBody");
-  if(b.querySelector(".empty")) b.innerHTML="";
+  const b=$("postBody"); if(b.querySelector(".empty")) b.innerHTML="";
   const tr=document.createElement("tr"); tr.className="in"+(isR?" r":"");
-  tr.innerHTML=`<td class="l">${li.claim_id}</td><td class="l">${li.patient_ref}</td>
+  tr.innerHTML=`<td class="l k">${li.claim_id}</td><td class="l">${li.patient_ref}</td>
     <td>${money(li.paid)}</td><td>${money(li.patient_responsibility)}</td>
     <td class="l">${li.carc||""}</td><td class="l">${li.event_type}</td>`;
   b.prepend(tr);
+}
+
+function onGem(ev){
+  if(!ev.ok) return;                 // count only successful extractions
+  gemSeen++;
+  if(ev.elapsed_ms){ gemLat.push(ev.elapsed_ms);
+    const avg=gemLat.reduce((a,b)=>a+b,0)/gemLat.length;
+    $("gemRate").textContent="~"+(avg/1000).toFixed(1)+"s/doc"; }
+  $("gemCount").textContent=gemSeen+" / "+total;
+  $("gemFill").style.right=(100-100*gemSeen/total)+"%";
 }
 
 function renderLedger(){
   const b=$("ledgerBody"); b.innerHTML="";
   for(const e of ledgerData.ledger){
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td class="l">${e.entity_id}</td><td class="l ${e.direction}">${e.direction.toUpperCase()}</td>
+    tr.innerHTML=`<td class="l k">${e.entity_id}</td><td class="l ${e.direction}">${e.direction.toUpperCase()}</td>
       <td class="${e.direction}">${money(e.amount)}</td><td class="l">${e.reason}</td>
       <td class="l dump">${e.dump_account_id||""}</td>`;
     b.appendChild(tr);
   }
-  $("recoupCount").textContent=ledgerData.totals.recoups_caught;
+  $("mRecoup").textContent=ledgerData.totals.recoups_caught;
 }
 
 function showClimax(){
   const cross=ledgerData.recoups.find(r=>r.cross_patient&&r.status==="matched");
-  if(!cross){ return; }
-  const docId=claimToDoc[cross.recoup_claim_id]; const meta=docsById[docId]||{};
-  const box=meta.recoup_box;
-  const bandHtml=box?`<div class="band on" style="left:${box.x*100}%;top:${box.y*100}%;width:${box.w*100}%;height:${box.h*100}%"><span class="lbl">⚠ RECOUPMENT</span></div>`:"";
+  if(!cross) return;
+  const meta=docsById[claimToDoc[cross.recoup_claim_id]]||{}; const box=meta.recoup_box;
+  const band=box?`<div class="band on" style="left:${box.x*100}%;top:${box.y*100}%;width:${box.w*100}%;height:${box.h*100}%"><span class="l">⚠ RECOUPMENT</span></div>`:"";
   $("climax").innerHTML=`<div class="cx">
-    <div class="frame">${meta.img?`<img class="page" src="${meta.img}">`:""}${bandHtml}</div>
-    <div>
-      <div class="k">RECOUPMENT RECONCILED</div>
+    <div class="frame">${meta.img?`<img class="page" src="${meta.img}">`:""}${band}</div>
+    <div><div class="k">RECOUPMENT RECONCILED</div>
       <h2>A $${money(cross.amount)} takeback was hiding in a $0.00 check.</h2>
-      <p>Claim <b>${cross.recoup_claim_id}</b> clawed back $${money(cross.amount)} and was silently netted against
-      claim <b>${cross.original_claim_id}</b> inside the same check — a human poster sees a zero-dollar check and moves on.</p>
+      <p>Claim <b style="color:#fff">${cross.recoup_claim_id}</b> clawed back $${money(cross.amount)} and was silently netted against
+      claim <b style="color:#fff">${cross.original_claim_id}</b> in the same check — a human poster sees a zero-dollar check and moves on.</p>
       <div class="led">Posted as a two-row dump-account entry (${cross.dump_account_id}):<br>
-        <b>${cross.original_claim_id} — payment intact</b> &nbsp;·&nbsp; <span class="d">${cross.recoup_claim_id} — provider owes $${money(cross.amount)}</span></div>
-      <div class="close" onclick="document.getElementById('climax').classList.remove('show')">click to dismiss</div>
+      <b>${cross.original_claim_id} — payment intact</b> &nbsp;·&nbsp; <span class="d">${cross.recoup_claim_id} — provider owes $${money(cross.amount)}</span></div>
+      <div class="x" onclick="document.getElementById('climax').classList.remove('show')">dismiss</div>
     </div></div>`;
   $("climax").classList.add("show");
 }
 
-function maybeFinish(){
-  if(climaxed) return;
-  if(featured>=total && total>0 && ledgerData){
-    climaxed=true;
-    renderLedger();
-    setTimeout(showClimax,500);
-    clearInterval(pumpIv);
+function showVerdict(gd){
+  const done=gd.completed||0;
+  const cerTxt=gd.cer_sec?`in ${gd.cer_sec.toFixed(2)}s`:`first`;
+  if(done===0){
+    $("verdict").innerHTML=`<b>Cerebras cleared the batch ${cerTxt}.</b> The Gemini baseline returned no completions in that window (free-tier quota) — Cerebras finished before it could keep up.`;
+  } else {
+    const ratio=total/done;
+    $("verdict").innerHTML=`<b>${ratio.toFixed(1)}× the throughput.</b> Cerebras posted all ${total} EOBs ${cerTxt}; in that window Gemini read ${done} of ${total}`+
+      (gd.avg_ms?` (~${(gd.avg_ms/1000).toFixed(1)}s per document)`:``)+`.`;
   }
+  $("verdict").classList.add("show");
+}
+
+function maybeClimax(){
+  if(!climaxed && cerSeen>=total && total>0 && ledgerData){ climaxed=true; renderLedger(); setTimeout(showClimax,450); clearInterval(pumpIv); }
 }
 
 $("run").onclick=async()=>{
   $("run").disabled=true; reset();
   const r=await fetch("/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({count:24})});
-  const data=await r.json();
-  buildWall(data.docs);
+  const data=await r.json(); buildWall(data.docs);
   t0=performance.now();
-  timerIv=setInterval(()=>{ $("timer").innerHTML=((performance.now()-t0)/1000).toFixed(2)+"<small>s</small>"; },33);
-  pumpIv=setInterval(()=>{ if(pending.length){ featureDoc(pending.shift()); } maybeFinish(); },PACE);
+  cerTimerIv=setInterval(()=>{ if(!cerFrozen)$("cerTimer").textContent=((performance.now()-t0)/1000).toFixed(2)+"s"; },33);
+  gemTimerIv=setInterval(()=>{ $("gemTimer").textContent=((performance.now()-t0)/1000).toFixed(2)+"s"; },33);
+  pumpIv=setInterval(()=>{ if(pending.length) featureDoc(pending.shift()); maybeClimax(); },PACE);
 
   const es=new EventSource(`/jobs/${data.job_id}/stream`);
   es.onmessage=(m)=>{
     const ev=JSON.parse(m.data);
-    if(ev.type==="doc"){ if(ev.line_items.length) pending.push(ev); else { featured++; $("detCount").textContent=featured; } }
-    else if(ev.type==="ledger"){ ledgerData=ev; }
-    else if(ev.type==="done"){
-      doneElapsed=ev.elapsed_ms; clearInterval(timerIv);
-      $("timer").innerHTML=(ev.elapsed_ms/1000).toFixed(2)+"<small>s</small>";
-      es.close(); $("run").disabled=false; maybeFinish();
+    if(ev.type==="doc"){
+      if(ev.usage&&ev.time_info&&ev.time_info.completion_time){ sumCt+=(ev.usage.completion_tokens||0); sumCt_t+=ev.time_info.completion_time;
+        if(sumCt_t>0)$("cerTps").textContent=Math.round(sumCt/sumCt_t).toLocaleString()+" tok/s"; }
+      if(ev.line_items.length) pending.push(ev); else { cerSeen++; advanceCer(); }
     }
+    else if(ev.type==="gem"){ onGem(ev); }
+    else if(ev.type==="ledger"){ ledgerData=ev; }
+    else if(ev.type==="cer_done"){ cerFrozen=true; clearInterval(cerTimerIv); $("cerTimer").textContent=(ev.elapsed_ms/1000).toFixed(2)+"s"; ev._cer=true; window._cerSec=ev.elapsed_ms/1000; }
+    else if(ev.type==="gem_done"){ clearInterval(gemTimerIv); showVerdict({completed:ev.completed,avg_ms:ev.avg_ms,cer_sec:window._cerSec}); }
+    else if(ev.type==="done"){ es.close(); $("run").disabled=false; maybeClimax(); }
   };
 };
 </script>
