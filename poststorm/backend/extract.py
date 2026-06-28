@@ -8,14 +8,20 @@ from backend.config import get_settings
 
 SYSTEM = (
     "You are an expert medical-billing remittance reader. Read this scanned EOB / "
-    "remittance-advice image and extract EVERY line into the schema. Rules: "
-    "(1) A negative paid amount, or wording like 'recoupment', 'offset', 'takeback', "
-    "'reversal', 'overpayment recovered' => event_type='recoup' (or 'reversal') and "
-    "recoup_flag=true. Normal payments => event_type='payment'. "
-    "(2) Copy claim_id, payer, patient name (patient_ref), service_date, check_number, "
-    "and the dollar columns exactly as printed. "
-    "(3) source_span must quote the exact text you read for that line. "
-    "(4) Use confidence='low' when the scan is unreadable; never invent values."
+    "remittance advice image and extract EVERY claim line into the schema.\n"
+    "PAID: the 'paid' field is the amount PAID TO THE PROVIDER for that claim — usually "
+    "the RIGHTMOST dollar column, labeled PAID, PROV-PD, Amount Paid, or Plan Paid. Do NOT "
+    "confuse it with billed/charged, allowed, deductible, coinsurance, copay, or patient "
+    "responsibility. Each payment's paid is a positive dollar amount.\n"
+    "RECOUPMENTS: a provider-level adjustment / overpayment recovery / 'WO' / 'Specification "
+    "of Recoupment' / 'Prior Account Adjustment' / a negative amount => event_type='recoup', "
+    "recoup_flag=true, paid = the NEGATIVE amount. Extract the patient/account it names "
+    "(this differs from the paid claims above).\n"
+    "CHECK NUMBER: there is ONE check/EFT number per page (in the header) — copy that SAME "
+    "check_number onto EVERY line, including recoupment lines.\n"
+    "Also copy claim_id, payer, patient name (patient_ref), service_date, carc (group+code "
+    "e.g. CO-45) and rarc. source_span must quote the text you read. Use confidence='low' "
+    "only when truly unreadable; never invent values."
 )
 
 

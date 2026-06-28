@@ -1,127 +1,199 @@
-"""Synthetic but realistic remittance-advice (EOB) case specs.
+"""Synthetic remittance case specs across four authentic payer templates.
 
-Each "case" is one scanned remittance for one check/EFT. It groups claims, each with
-a service line (CPT, modifiers, billed/allowed/deductible/coinsurance/paid, group +
-CARC/RARC codes). `recoup_cases` of them carry an OVERPAYMENT RECOVERY claim whose
-amount + check match a payment to a DIFFERENT patient on the same check — the
-cross-patient dump-account offset the reconcile engine catches.
+Every document shares the 835 skeleton but diverges in masthead/font/wording.
+Recoupments are emitted as a provider-level adjustment (PLB) — NOT an inline
+negative claim — while still producing one reconcilable recoup LineItem:
+a payment to Patient A of $X and an overpayment recovery of $X for a DIFFERENT
+Patient B on the SAME check (the cross-patient dump-account signal).
 
-`claims` carries the full detail used for rendering; `lines` is the canonical
-extraction target (the LineItem-shaped subset) used by reconcile + ground truth.
+`claims`/`recoup`/header fields drive rendering; `lines` is the canonical
+LineItem extraction target consumed by reconcile + ground truth.
 """
 import random
 
-PAYERS = [
-    {"name": "Aetna", "addr": "PO Box 14079, Lexington, KY 40512-4079", "id": "60054"},
-    {"name": "UnitedHealthcare", "addr": "PO Box 30555, Salt Lake City, UT 84130", "id": "87726"},
-    {"name": "Cigna Healthcare", "addr": "PO Box 188061, Chattanooga, TN 37422", "id": "62308"},
-    {"name": "Blue Cross Blue Shield", "addr": "PO Box 660044, Dallas, TX 75266", "id": "00510"},
-    {"name": "Medicare Part B / Novitas", "addr": "PO Box 3093, Mechanicsburg, PA 17055", "id": "MCRPB"},
-]
+TEMPLATES = ["medicare", "uhc", "cigna", "aetna_bcbs"]
+
+MACS = ["NORIDIAN HEALTHCARE SOLUTIONS", "NOVITAS SOLUTIONS", "PALMETTO GBA",
+        "WPS GOVERNMENT HEALTH ADMINISTRATORS", "NATIONAL GOVERNMENT SERVICES",
+        "CGS ADMINISTRATORS", "FIRST COAST SERVICE OPTIONS"]
+MAC_ADDR = "MEDICARE PART B    PO BOX 6704, FARGO, ND 58108-6704"
+
+PAYERS = {
+    "uhc": {"name": "UnitedHealthcare", "addr": "PO Box 30555, Salt Lake City, UT 84130", "pid": "87726"},
+    "cigna": {"name": "Cigna Healthcare", "addr": "PO Box 188061, Chattanooga, TN 37422", "pid": "62308"},
+    "aetna": {"name": "Aetna", "addr": "PO Box 14079, Lexington, KY 40512", "pid": "60054"},
+    "bcbs": {"name": "Blue Cross Blue Shield", "addr": "PO Box 660044, Dallas, TX 75266", "pid": "00510"},
+}
 PROVIDERS = [
     {"name": "Riverside Family Medicine", "addr": "1820 W Main St, Springfield, IL 62704",
-     "npi": "1043217865", "tax": "37-1882044"},
+     "npi": "1043217865", "ptan": "IL0043217", "tin": "37-1882044"},
     {"name": "Lakeshore Internal Medicine", "addr": "455 Lake Ave, Madison, WI 53703",
-     "npi": "1295736410", "tax": "39-2014778"},
+     "npi": "1295736410", "ptan": "WI0129573", "tin": "39-2014778"},
     {"name": "Summit Orthopedic Associates", "addr": "30 Parkway Dr, Columbus, OH 43215",
-     "npi": "1639920457", "tax": "31-0998123"},
+     "npi": "1639920457", "ptan": "OH0163992", "tin": "31-0998123"},
 ]
-CPTS = [("99213", "Office/outpatient visit est"), ("99214", "Office/outpatient visit est"),
-        ("99215", "Office/outpatient visit est"), ("80053", "Comprehensive metabolic panel"),
-        ("85025", "Complete blood count w/ diff"), ("93000", "Electrocardiogram, complete"),
-        ("71046", "Chest X-ray, 2 views"), ("20610", "Arthrocentesis, major joint")]
-MODS = ["", "", "", "25", "59", "RT"]
-CARCS = [("CO", "45", "Charge exceeds fee schedule/maximum allowable"),
-         ("PR", "1", "Deductible amount"), ("PR", "2", "Coinsurance amount"),
-         ("CO", "97", "Payment included in another service/procedure"),
-         ("CO", "16", "Claim lacks information needed for adjudication"),
-         ("PR", "3", "Co-payment amount")]
-RARCS = [("N130", "Consult plan benefit documents for information"),
-         ("M15", "Separately billed services bundled; not separately payable"),
-         ("N370", "Billing exceeds the rental months covered"),
-         ("MA01", "Alert: appeal rights and timeframe"), ("N130", "Consult plan benefit documents")]
-RECOVERY_RARC = ("N469", "Alert: overpayment recovered; offset applied to this remittance")
-FIRST = ["James", "Maria", "Robert", "Linda", "David", "Susan", "John", "Karen", "Michael",
-         "Nancy", "Daniel", "Patricia", "Angela", "Thomas", "Sandra", "Kevin"]
-LAST = ["Lee", "Patel", "Garcia", "Smith", "Nguyen", "Brown", "Jones", "Davis", "Wilson",
-        "Khan", "Martinez", "Clark", "Robinson", "Walker", "Young", "Adams"]
+CPTS = [("99213", "Office/outpatient visit, est, low"), ("99214", "Office/outpatient visit, est, mod"),
+        ("99215", "Office/outpatient visit, est, high"), ("80053", "Comprehensive metabolic panel"),
+        ("85025", "Complete blood count w/ auto diff"), ("93000", "Electrocardiogram, complete"),
+        ("71046", "Radiologic exam, chest, 2 views"), ("20610", "Arthrocentesis, major joint")]
+MODS = ["", "", "", "25", "59", "RT", "LT"]
+FIRST = ["JAMES", "MARIA", "ROBERT", "LINDA", "DAVID", "SUSAN", "JOHN", "KAREN", "MICHAEL",
+         "NANCY", "DANIEL", "PATRICIA", "ANGELA", "THOMAS", "SANDRA", "KEVIN", "BARBARA",
+         "RICHARD", "JESSICA", "CHARLES", "ASHLEY", "JOSEPH", "EMILY", "PAUL"]
+LAST = ["LEE", "PATEL", "GARCIA", "SMITH", "NGUYEN", "BROWN", "JONES", "DAVIS", "WILSON",
+        "KHAN", "MARTINEZ", "CLARK", "ROBINSON", "WALKER", "YOUNG", "ADAMS", "HALL",
+        "ALLEN", "KING", "WRIGHT", "TORRES", "HILL", "GREEN", "BAKER"]
+
+# CARC/RARC verbatim text (only codes actually used get glossed)
+CARC_TEXT = {
+    "CO-45": "Charge exceeds fee schedule/maximum allowable or contracted fee arrangement",
+    "CO-253": "Sequestration - reduction in federal payment",
+    "PR-1": "Deductible amount",
+    "PR-2": "Coinsurance amount",
+    "CO-97": "Benefit included in payment/allowance for another service already adjudicated",
+    "OA-23": "Impact of prior payer(s) adjudication including payments and/or adjustments",
+}
+RARC_TEXT = {
+    "N130": "Consult plan benefit documents/guidelines for information about restrictions",
+    "M15": "Separately billed services/tests bundled; not separately payable",
+    "MA18": "Claim information forwarded to the patient's supplemental/secondary insurer",
+    "N469": "Alert: overpayment recovered; offset applied to this remittance",
+    "MA01": "Alert: appeal rights and timeframe if you do not agree",
+}
+_MBI_A = "ACDEFGHJKMNPQRTUVWXY"  # MBI letters exclude S,L,O,I,B,Z
 
 
-def _name(rng):
-    return f"{rng.choice(LAST).upper()}, {rng.choice(FIRST).upper()}"
+def _mbi(rng):
+    p = [str(rng.randint(1, 9)), rng.choice(_MBI_A), rng.choice(_MBI_A + "0123456789"),
+         str(rng.randint(0, 9)), rng.choice(_MBI_A), rng.choice(_MBI_A + "0123456789"),
+         str(rng.randint(0, 9)), rng.choice(_MBI_A), rng.choice(_MBI_A),
+         str(rng.randint(0, 9)), str(rng.randint(0, 9))]
+    return "".join(p)
 
 
-def _icn(rng, dos_compact):
-    return f"{dos_compact}{rng.randint(100000, 999999)}"
+def _member(rng, bcbs=False):
+    pre = rng.choice(["XJK", "ZUH", "QPR", "YMA"]) if bcbs else ""
+    return pre + "".join(str(rng.randint(0, 9)) for _ in range(rng.randint(9, 10)))
+
+
+def _icn(rng):
+    return f"{rng.randint(10, 39)}26{rng.randint(100000000, 999999999)}"[:13]
+
+
+def _claim(rng, payer, check, dos_dd, medicare):
+    cpt, cpt_desc = rng.choice(CPTS)
+    billed = float(rng.randint(140, 900))
+    allowed = round(billed * rng.uniform(0.42, 0.78), 2)
+    deduct = float(rng.choice([0, 0, 0, 25, 50]))
+    coins = round(max(allowed - deduct, 0) * rng.choice([0, 0, 0.1, 0.2]), 2)
+    pre = max(allowed - deduct - coins, 0)
+    seq = round(pre * 0.02, 2) if medicare else 0.0
+    paid = round(pre - seq, 2)
+    carcs = [("CO-45", round(billed - allowed, 2))]
+    if medicare and seq:
+        carcs.append(("CO-253", seq))
+    if deduct:
+        carcs.append(("PR-1", deduct))
+    if coins:
+        carcs.append(("PR-2", coins))
+    rarcs = [rng.choice(["N130", "M15"])]
+    return {
+        "patient": f"{rng.choice(LAST)}, {rng.choice(FIRST)}", "mbi": _mbi(rng),
+        "member": _member(rng, payer == "bcbs"), "acct": f"{rng.choice(['RIV','LAK','SUM'])}-{rng.randint(1000,9999)}",
+        "icn": _icn(rng), "dos_dd": dos_dd, "dos_iso": f"2026-01-{dos_dd:02d}",
+        "cpt": cpt, "cpt_desc": cpt_desc, "mod": rng.choice(MODS), "pos": rng.choice(["11", "11", "22", "19"]),
+        "units": 1, "billed": billed, "allowed": allowed, "deduct": deduct, "coins": coins,
+        "seq": seq, "paid": paid, "carcs": carcs, "rarcs": rarcs,
+    }
+
+
+def _line(c, payer_str, check):
+    return {
+        "claim_id": c["icn"], "payer": payer_str, "patient_ref": c["patient"],
+        "service_date": c["dos_iso"], "carc": c["carcs"][0][0], "rarc": c["rarcs"],
+        "charge": c["billed"], "allowed": c["allowed"], "paid": c["paid"],
+        "adjustment": round(c["billed"] - c["allowed"], 2),
+        "patient_responsibility": round(c["deduct"] + c["coins"], 2),
+        "event_type": "payment", "recoup_flag": False, "offset_link": None,
+        "check_number": check, "confidence": "high",
+        "source_span": f"{c['icn']} {c['patient']} {c['paid']:.2f}",
+    }
 
 
 def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
     rng = random.Random(seed)
-    recoup_idxs = set(rng.sample(range(n), min(recoup_cases, n)))
+    # Spread planted recoups across DISTINCT templates so each shows its own recoup
+    # rendering (Medicare PLB WO / UHC Provider-Level Adj / Cigna recoupment box / Aetna band).
+    recoup_idxs, used_t = set(), set()
+    for i in range(len(TEMPLATES), n):
+        if len(recoup_idxs) >= recoup_cases:
+            break
+        t = TEMPLATES[i % len(TEMPLATES)]
+        if t not in used_t:
+            recoup_idxs.add(i)
+            used_t.add(t)
     cases = []
     for i in range(n):
-        payer = rng.choice(PAYERS)
-        provider = rng.choice(PROVIDERS)
-        check = f"{rng.randint(40000000, 99999999)}"
-        mm, dd = rng.randint(1, 1), rng.randint(2, 26)
+        template = TEMPLATES[i % len(TEMPLATES)]
+        medicare = template == "medicare"
+        if medicare:
+            payer_key = "medicare"
+            payer_str = "Medicare Part B"
+            mac = MACS[i % len(MACS)]
+        elif template == "aetna_bcbs":
+            payer_key = rng.choice(["aetna", "bcbs"])
+            payer_str = PAYERS[payer_key]["name"]
+            mac = None
+        else:
+            payer_key = template
+            payer_str = PAYERS[payer_key]["name"]
+            mac = None
+
+        prov = rng.choice(PROVIDERS)
+        check = ("EFT" + str(rng.randint(1000000, 9999999))) if template == "uhc" else str(rng.randint(1000000, 99999999))
         cdate = f"01/{rng.randint(20, 28):02d}/2026"
-        claims = []
 
-        for _ in range(rng.randint(2, 3)):
-            patient = _name(rng)
-            dos = f"01/{dd:02d}-01/{dd:02d}/2026"
-            cpt, cpt_desc = rng.choice(CPTS)
-            billed = float(rng.randint(120, 900))
-            allowed = round(billed * rng.uniform(0.42, 0.78), 2)
-            deduct = round(rng.choice([0, 0, 0, 25, 50]) * 1.0, 2)
-            coins = round(max(allowed - deduct, 0) * rng.choice([0, 0, 0.1, 0.2]), 2)
-            paid = round(max(allowed - deduct - coins, 0), 2)
-            grp, carc, carc_desc = rng.choice(CARCS)
-            rarc, rarc_desc = rng.choice(RARCS)
-            claims.append({
-                "icn": _icn(rng, f"2026{dd:02d}"), "patient_ref": patient,
-                "member": f"{rng.choice('WXYZ')}{rng.randint(10000000, 99999999)}",
-                "acct": f"{provider['name'][:3].upper()}-{rng.randint(1000, 9999)}",
-                "dos": dos, "service_date": f"2026-01-{dd:02d}", "cpt": cpt, "cpt_desc": cpt_desc,
-                "mod": rng.choice(MODS), "units": 1,
-                "billed": billed, "allowed": allowed, "deduct": deduct, "coins": coins, "paid": paid,
-                "group": grp, "carc": f"{grp}-{carc}", "carc_desc": carc_desc,
-                "rarc": [rarc], "rarc_desc": rarc_desc,
-                "event_type": "payment", "recoup_flag": False, "is_recoup": False,
+        claims = [_claim(rng, payer_key, check, rng.randint(2, 26), medicare) for _ in range(rng.randint(2, 3))]
+        # keep patient names distinct within the doc
+        seen = set()
+        for c in claims:
+            while c["patient"] in seen:
+                c["patient"] = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
+            seen.add(c["patient"])
+
+        lines = [_line(c, payer_str, check) for c in claims]
+        recoup = None
+        planted = i in recoup_idxs
+        if planted:
+            # choose a paid claim P whose paid is unique on this check
+            uniq = [c for c in claims if sum(1 for x in claims if abs(x["paid"] - c["paid"]) < 0.005) == 1]
+            P = (uniq or claims)[0]
+            X = P["paid"]  # copy exactly
+            pb = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
+            while pb in seen:
+                pb = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
+            prior_icn = _icn(rng)
+            recoup = {
+                "patient_b": pb, "mbi_b": _mbi(rng), "member_b": _member(rng, payer_key == "bcbs"),
+                "acct_b": f"{rng.choice(['RIV','LAK','SUM'])}-{rng.randint(1000,9999)}",
+                "amount": X, "prior_icn": prior_icn,
+                "fcn": f"21{rng.randint(10,39)}R{rng.randint(1000000,9999999)}",
+                "nb_id": f"NB-2026-{rng.randint(10000,99999)}", "date": cdate,
+            }
+            lines.append({
+                "claim_id": prior_icn, "payer": payer_str, "patient_ref": pb,
+                "service_date": cdate.replace("01/", "2026-01-").replace("/2026", ""),
+                "carc": None, "rarc": ["N469"], "charge": X, "allowed": X, "paid": -X,
+                "adjustment": X, "patient_responsibility": 0.0, "event_type": "recoup",
+                "recoup_flag": True, "offset_link": None, "check_number": check, "confidence": "high",
+                "source_span": f"WO overpayment recovery {pb} -{X:.2f}",
             })
 
-        if i in recoup_idxs:
-            orig = claims[0]
-            amt = orig["paid"]
-            patient_b = _name(rng)
-            prior_dd = rng.randint(1, 20)
-            claims.append({
-                "icn": _icn(rng, f"2026{dd:02d}"), "patient_ref": patient_b,
-                "member": f"{rng.choice('WXYZ')}{rng.randint(10000000, 99999999)}", "acct": "",
-                "dos": f"01/{prior_dd:02d}-01/{prior_dd:02d}/2026", "service_date": f"2026-01-{prior_dd:02d}",
-                "cpt": orig["cpt"], "cpt_desc": orig["cpt_desc"], "mod": "", "units": 1,
-                "billed": 0.0, "allowed": 0.0, "deduct": 0.0, "coins": 0.0, "paid": -amt,
-                "group": "OA", "carc": "OA-23", "carc_desc": "Prior payer/overpayment adjustment",
-                "rarc": [RECOVERY_RARC[0]], "rarc_desc": RECOVERY_RARC[1],
-                "event_type": "recoup", "recoup_flag": True, "is_recoup": True,
-                "fcn": f"FCN{rng.randint(70000000, 99999999)}",
-                "prior_icn": _icn(rng, f"202511{prior_dd:02d}"),
-            })
-
-        lines = [{
-            "claim_id": c["icn"], "payer": payer["name"], "patient_ref": c["patient_ref"],
-            "service_date": c["service_date"], "carc": c["carc"], "rarc": c["rarc"],
-            "charge": c["billed"], "allowed": c["allowed"], "paid": c["paid"],
-            "adjustment": round(c["billed"] - c["allowed"], 2),
-            "patient_responsibility": round(c["deduct"] + c["coins"], 2),
-            "event_type": c["event_type"], "recoup_flag": c["recoup_flag"], "offset_link": None,
-            "check_number": check, "confidence": "high",
-            "source_span": f"{c['icn']} {c['patient_ref']} {c['paid']:.2f}",
-        } for c in claims]
-
+        check_amt = round(sum(c["paid"] for c in claims) - (recoup["amount"] if recoup else 0), 2)
         cases.append({
-            "doc_id": f"eob_{i:03d}", "payer": payer, "provider": provider,
-            "check_number": check, "check_date": cdate, "has_planted_recoup": i in recoup_idxs,
-            "claims": claims, "lines": lines,
+            "doc_id": f"eob_{i:03d}", "template": template, "payer_key": payer_key,
+            "payer_str": payer_str, "mac": mac, "payer_meta": PAYERS.get(payer_key, {}),
+            "provider": prov, "check_number": check, "check_date": cdate, "check_amt": check_amt,
+            "has_planted_recoup": planted, "claims": claims, "recoup": recoup, "lines": lines,
         })
     return cases
