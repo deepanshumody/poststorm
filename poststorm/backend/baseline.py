@@ -20,7 +20,8 @@ def extract_page_gemini(image_data_uri: str, max_retries: int = 3) -> dict:
         return {"ok": False, "elapsed_ms": 0.0, "status": "no_key"}
     header, b64 = image_data_uri.split(",", 1)
     mime = header.split(";")[0].replace("data:", "") or "image/png"
-    url = f"{BASE}/models/{GEM_MODEL}:generateContent?key={s.gemini_api_key}"
+    url = f"{BASE}/models/{GEM_MODEL}:generateContent"
+    auth = {"x-goog-api-key": s.gemini_api_key}  # key in header, never in URL/logs
     body = {
         "contents": [{"parts": [
             {"text": PROMPT},
@@ -32,7 +33,7 @@ def extract_page_gemini(image_data_uri: str, max_retries: int = 3) -> dict:
     for attempt in range(max_retries):
         try:
             t0 = time.perf_counter()
-            r = httpx.post(url, json=body, timeout=90)
+            r = httpx.post(url, json=body, headers=auth, timeout=90)
             ms = (time.perf_counter() - t0) * 1000
             if r.status_code == 200:
                 return {"ok": True, "elapsed_ms": ms, "status": "ok"}

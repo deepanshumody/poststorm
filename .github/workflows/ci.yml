@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poststorm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r requirements.txt ruff
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: System fonts (for the fixture generator)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - name: Generate synthetic fixtures
+        run: python generator/generate.py
+      - name: Tests
+        run: python -m pytest -q

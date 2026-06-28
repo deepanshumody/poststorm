@@ -3,6 +3,9 @@ import time
 from dataclasses import asdict
 
 from backend import baseline, extract, images, reconcile
+from backend.logging_config import get_logger
+
+log = get_logger("poststorm.jobs")
 
 CONCURRENCY = 4       # Cerebras lane
 GEM_CONCURRENCY = 4   # Gemini lane (same, for a fair race)
@@ -35,8 +38,10 @@ async def run_job(paths: list[str]):
             try:
                 res = await asyncio.to_thread(extract.extract_page, uris[idx])
                 return ("cer", idx, res, None)
-            except Exception as e:
-                return ("cer", idx, None, str(e))
+            except Exception:
+                # Full trace to the server log; only a generic code to the client.
+                log.exception("extraction failed for %s", paths[idx])
+                return ("cer", idx, None, "extraction_failed")
 
     async def gem_one(idx):
         async with gem_sem:

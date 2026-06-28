@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 from backend.schema import EventType, LineItem
 
@@ -11,17 +10,17 @@ class LedgerEntry:
     direction: str
     amount: float
     reason: str
-    linked_claim: Optional[str] = None
-    dump_account_id: Optional[str] = None
+    linked_claim: str | None = None
+    dump_account_id: str | None = None
     source_claims: list = field(default_factory=list)
 
 
 @dataclass
 class Recoup:
     recoup_claim_id: str
-    original_claim_id: Optional[str]
+    original_claim_id: str | None
     cross_patient: bool
-    dump_account_id: Optional[str]
+    dump_account_id: str | None
     amount: float
     status: str  # "matched" | "needs_review"
 

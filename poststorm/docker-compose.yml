@@ -1,0 +1,14 @@
+services:
+  poststorm:
+    build: .
+    image: poststorm:latest
+    ports:
+      - "8000:8000"
+    # Secrets/config injected as env vars (never baked into the image).
+    # Copy .env.example to ../.env (repo root) and fill in your keys.
+    env_file:
+      - ../.env
+    environment:
+      CORS_ORIGINS: http://localhost:8000
+      LOG_LEVEL: INFO
+    restart: unless-stopped

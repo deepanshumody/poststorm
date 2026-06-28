@@ -2,10 +2,8 @@
 
 Run from this directory:  python smoke_test.py
 """
-import json
 
 import httpx
-
 from config import get_settings
 
 # 1x1 transparent PNG — just to confirm the multimodal request shape is accepted.

@@ -1,6 +1,5 @@
 import json
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -23,7 +22,7 @@ class LineItem(BaseModel):
     payer: str
     patient_ref: str
     service_date: str
-    carc: Optional[str] = None
+    carc: str | None = None
     rarc: list[str] = []
     charge: float
     allowed: float
@@ -32,7 +31,7 @@ class LineItem(BaseModel):
     patient_responsibility: float
     event_type: EventType
     recoup_flag: bool
-    offset_link: Optional[str] = None
+    offset_link: str | None = None
     check_number: str
     confidence: Confidence
     source_span: str

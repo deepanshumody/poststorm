@@ -6,7 +6,7 @@ import io
 import json
 import random
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -40,7 +40,7 @@ _PATHS = {
 }
 
 
-@lru_cache(maxsize=None)
+@cache
 def F(kind, size):
     for p in _PATHS[kind]:
         if Path(p).exists():

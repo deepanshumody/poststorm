@@ -3,9 +3,13 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Repo-root .env (repo-root/.env), found relative to this file so it
-# works no matter what the current working directory is.
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+# Find .env in the project dir first, then the repo root — works regardless of CWD.
+# In containers, config comes from injected env vars and no .env file is needed.
+_CANDIDATES = [
+    Path(__file__).resolve().parents[1] / ".env",  # poststorm/.env
+    Path(__file__).resolve().parents[2] / ".env",  # repo-root .env
+]
+_ENV_PATH = next((str(p) for p in _CANDIDATES if p.exists()), str(_CANDIDATES[0]))
 
 
 class Settings(BaseSettings):
@@ -15,6 +19,11 @@ class Settings(BaseSettings):
     cerebras_base_url: str = "https://api.cerebras.ai/v1"
     cerebras_model: str = "gemma-4-31b"
     gemini_api_key: str = ""
+
+    # Deployment / security knobs (12-factor: all overridable via env)
+    cors_origins: str = "http://localhost:8000"
+    log_level: str = "INFO"
+    max_batch: int = 48  # hard cap on documents per job (fan-out / cost guard)
 
 
 @lru_cache

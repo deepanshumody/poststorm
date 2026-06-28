@@ -238,6 +238,8 @@
 <script>
 const $=(id)=>document.getElementById(id);
 const money=(n)=>Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+// Escape model-extracted text before innerHTML (a crafted scan could make the model emit markup).
+const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const PACE=170;
 
 let docsById={}, claimToDoc={}, pending=[], total=0;
@@ -274,14 +276,14 @@ function featureDoc(ev){
   const meta=docsById[ev.doc_id]||{};
   $("frame").classList.remove("empty");
   const pg=$("page"); pg.style.display="block"; pg.src=meta.img||"";
-  $("docname").innerHTML=`<b>${ev.doc_id}</b> · ${meta.payer||""}`;
+  $("docname").innerHTML=`<b>${esc(ev.doc_id)}</b> · ${esc(meta.payer||"")}`;
   const fr=$("frame"); fr.classList.remove("scanning"); void fr.offsetWidth; fr.classList.add("scanning");
   const chips=$("chips"); chips.innerHTML=""; let hasR=false;
   for(const li of ev.line_items){
     const isR=li.recoup_flag||["recoup","reversal"].includes(li.event_type);
     hasR=hasR||isR; claimToDoc[li.claim_id]=ev.doc_id;
     const c=document.createElement("div"); c.className="chip"+(isR?" r":"");
-    c.innerHTML=`<span>${li.claim_id} · ${li.patient_ref}</span><span>${money(li.paid)}</span>`;
+    c.innerHTML=`<span>${esc(li.claim_id)} · ${esc(li.patient_ref)}</span><span>${money(li.paid)}</span>`;
     chips.appendChild(c);
     if(!isR){ posted++; amt+=Number(li.paid); }
     addPostRow(li,isR);
@@ -308,9 +310,9 @@ function advanceCer(){
 function addPostRow(li,isR){
   const b=$("postBody"); if(b.querySelector(".empty")) b.innerHTML="";
   const tr=document.createElement("tr"); tr.className="in"+(isR?" r":"");
-  tr.innerHTML=`<td class="l k">${li.claim_id}</td><td class="l">${li.patient_ref}</td>
+  tr.innerHTML=`<td class="l k">${esc(li.claim_id)}</td><td class="l">${esc(li.patient_ref)}</td>
     <td>${money(li.paid)}</td><td>${money(li.patient_responsibility)}</td>
-    <td class="l">${li.carc||""}</td><td class="l">${li.event_type}</td>`;
+    <td class="l">${esc(li.carc||"")}</td><td class="l">${esc(li.event_type)}</td>`;
   b.prepend(tr);
 }
 
@@ -328,9 +330,9 @@ function renderLedger(){
   const b=$("ledgerBody"); b.innerHTML="";
   for(const e of ledgerData.ledger){
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td class="l k">${e.entity_id}</td><td class="l ${e.direction}">${e.direction.toUpperCase()}</td>
-      <td class="${e.direction}">${money(e.amount)}</td><td class="l">${e.reason}</td>
-      <td class="l dump">${e.dump_account_id||""}</td>`;
+    tr.innerHTML=`<td class="l k">${esc(e.entity_id)}</td><td class="l ${e.direction}">${esc(e.direction.toUpperCase())}</td>
+      <td class="${e.direction}">${money(e.amount)}</td><td class="l">${esc(e.reason)}</td>
+      <td class="l dump">${esc(e.dump_account_id||"")}</td>`;
     b.appendChild(tr);
   }
   $("mRecoup").textContent=ledgerData.totals.recoups_caught;
@@ -345,10 +347,10 @@ function showClimax(){
     <div class="frame">${meta.img?`<img class="page" src="${meta.img}">`:""}${band}</div>
     <div><div class="k">RECOUPMENT RECONCILED</div>
       <h2>A $${money(cross.amount)} takeback was hiding in a $0.00 check.</h2>
-      <p>Claim <b style="color:#fff">${cross.recoup_claim_id}</b> clawed back $${money(cross.amount)} and was silently netted against
-      claim <b style="color:#fff">${cross.original_claim_id}</b> in the same check — a human poster sees a zero-dollar check and moves on.</p>
-      <div class="led">Posted as a two-row dump-account entry (${cross.dump_account_id}):<br>
-      <b>${cross.original_claim_id} — payment intact</b> &nbsp;·&nbsp; <span class="d">${cross.recoup_claim_id} — provider owes $${money(cross.amount)}</span></div>
+      <p>Claim <b style="color:#fff">${esc(cross.recoup_claim_id)}</b> clawed back $${money(cross.amount)} and was silently netted against
+      claim <b style="color:#fff">${esc(cross.original_claim_id)}</b> in the same check — a human poster sees a zero-dollar check and moves on.</p>
+      <div class="led">Posted as a two-row dump-account entry (${esc(cross.dump_account_id)}):<br>
+      <b>${esc(cross.original_claim_id)} — payment intact</b> &nbsp;·&nbsp; <span class="d">${esc(cross.recoup_claim_id)} — provider owes $${money(cross.amount)}</span></div>
       <div class="x" onclick="document.getElementById('climax').classList.remove('show')">dismiss</div>
     </div></div>`;
   $("climax").classList.add("show");
