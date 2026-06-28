@@ -1,0 +1,165 @@
+{
+  "docs": 24,
+  "lines_expected": 66,
+  "lines_extracted": 63,
+  "field_accuracy_pct": {
+    "paid_amount": 92.4,
+    "patient_name": 84.8,
+    "check_number": 77.3,
+    "recoup_flag": 92.4
+  },
+  "recoupment_detection": {
+    "planted": 3,
+    "true_positives": 3,
+    "false_positives": 0,
+    "recall_pct": 100.0,
+    "precision_pct": 100.0
+  },
+  "wall_seconds": 34.8,
+  "per_doc": [
+    {
+      "doc_id": "eob_000",
+      "template": "medicare",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_001",
+      "template": "uhc",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_002",
+      "template": "cigna",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_003",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_004",
+      "template": "medicare",
+      "planted": true,
+      "caught": 1
+    },
+    {
+      "doc_id": "eob_005",
+      "template": "uhc",
+      "planted": true,
+      "caught": 1
+    },
+    {
+      "doc_id": "eob_006",
+      "template": "cigna",
+      "planted": true,
+      "caught": 1
+    },
+    {
+      "doc_id": "eob_007",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_008",
+      "template": "medicare",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_009",
+      "template": "uhc",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_010",
+      "template": "cigna",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_011",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_012",
+      "template": "medicare",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_013",
+      "template": "uhc",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_014",
+      "template": "cigna",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_015",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_016",
+      "template": "medicare",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_017",
+      "template": "uhc",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_018",
+      "template": "cigna",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_019",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_020",
+      "template": "medicare",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_021",
+      "template": "uhc",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_022",
+      "template": "cigna",
+      "planted": false,
+      "caught": 0
+    },
+    {
+      "doc_id": "eob_023",
+      "template": "aetna_bcbs",
+      "planted": false,
+      "caught": 0
+    }
+  ]
+}

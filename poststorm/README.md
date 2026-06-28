@@ -14,6 +14,30 @@ show how much faster Cerebras clears the batch.
 
 ---
 
+## Results
+
+A representative live run over the 24-document synthetic corpus (4 payer templates), Gemma‑4 31B on Cerebras
+(`python -m eval.evaluate`):
+
+| Metric | Result |
+|---|---|
+| **Recoupment recall** | **100%** (3/3 cross-patient dump accounts caught) |
+| **Recoupment precision** | **100%** (0 false positives) |
+| Paid-amount accuracy | 92.4% |
+| Recoup-flag accuracy | 92.4% |
+| Patient-name accuracy | 84.8% |
+| Check-number accuracy (exact) | 77.3% |
+| Lines extracted / expected | 63 / 66 |
+
+The headline is the product metric — **100% recall / 100% precision on recoupment detection** — and it holds *despite*
+imperfect per-field extraction. That's the architecture working as designed: the LLM's slips land mostly in free-form
+IDs and the EFT-prefixed check strings, while the **deterministic** reconcile layer keys the dump-account match on
+*amount + check + patient together* (and check numbers are page-consistent even when not byte-exact). The
+catastrophic-exception-prone money math never runs in the model. (Extraction is non-deterministic, so exact numbers vary
+run to run.)
+
+---
+
 ## Quickstart (local)
 
 ```bash
