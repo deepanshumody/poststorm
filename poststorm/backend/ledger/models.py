@@ -78,3 +78,33 @@ class Feedback(Base):
     corrected_line: Mapped[str] = mapped_column(String)
     reviewer: Mapped[str] = mapped_column(String, default="demo-reviewer")
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class Tenant(Base):
+    __tablename__ = "tenant"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_key"
+    kid: Mapped[str] = mapped_column(String, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String)
+    key_hash: Mapped[str] = mapped_column(String)
+    salt: Mapped[str] = mapped_column(String)
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="")
+    principal: Mapped[str] = mapped_column(String, default="")
+    action: Mapped[str] = mapped_column(String)
+    resource: Mapped[str | None] = mapped_column(String, nullable=True)
+    status_code: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
