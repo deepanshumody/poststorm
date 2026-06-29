@@ -11,6 +11,7 @@ def test_role_ranking():
     assert auth.role_at_least("reviewer", "reviewer")
     assert not auth.role_at_least("viewer", "reviewer")
     assert not auth.role_at_least("nonsense", "viewer")
+    assert not auth.role_at_least("admin", "nonsense_minimum")
 
 
 def test_api_key_hash_roundtrip_and_wrong_key_fails():
@@ -42,4 +43,13 @@ def test_jwt_expired_token_rejected():
     p = auth.Principal(tenant="acme", role="viewer", sub="k_abc")
     token = auth.issue_jwt(p, "secret", ttl_seconds=10, now=time.time() - 10_000)
     with pytest.raises(jwt.ExpiredSignatureError):
+        auth.verify_jwt(token, "secret")
+
+
+def test_jwt_missing_claim_rejected():
+    # A validly-signed token missing a required claim must raise InvalidTokenError, not KeyError.
+    now = int(time.time())
+    token = jwt.encode({"sub": "k", "tenant": "acme", "iat": now, "exp": now + 100},
+                       "secret", algorithm="HS256")  # note: no "role" claim
+    with pytest.raises(jwt.InvalidTokenError):
         auth.verify_jwt(token, "secret")

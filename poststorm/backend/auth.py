@@ -48,5 +48,6 @@ def issue_jwt(principal: Principal, secret: str, ttl_seconds: int, now: float | 
 
 
 def verify_jwt(token: str, secret: str) -> Principal:
-    data = jwt.decode(token, secret, algorithms=["HS256"])
+    data = jwt.decode(token, secret, algorithms=["HS256"],
+                      options={"require": ["exp", "sub", "tenant", "role"]})
     return Principal(tenant=data["tenant"], role=data["role"], sub=data["sub"])
