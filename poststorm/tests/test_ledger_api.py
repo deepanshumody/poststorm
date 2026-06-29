@@ -17,3 +17,9 @@ def test_audit_endpoint_shape():
     r = client.get("/ledger/audit?limit=5")
     assert r.status_code == 200
     assert "events" in r.json()
+
+
+def test_audit_negative_limit_is_safe():
+    r = client.get("/ledger/audit?limit=-5")
+    assert r.status_code == 200
+    assert "events" in r.json()

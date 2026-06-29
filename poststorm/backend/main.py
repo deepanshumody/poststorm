@@ -36,7 +36,10 @@ app.add_middleware(
 )
 app.mount("/eobs", StaticFiles(directory=str(EOBS)), name="eobs")
 
-ledger_db.init_db()
+try:
+    ledger_db.init_db()
+except Exception:
+    log.warning("ledger init_db failed; ledger persistence disabled this run", exc_info=True)
 
 
 @app.get("/ledger/balances")
@@ -52,7 +55,7 @@ def ledger_balances():
 def ledger_audit(limit: int = 50):
     s = ledger_db.SessionLocal()
     try:
-        return {"events": ledger_service.audit_trail(s, "demo", min(limit, 200))}
+        return {"events": ledger_service.audit_trail(s, "demo", max(0, min(limit, 200)))}
     finally:
         s.close()
 
