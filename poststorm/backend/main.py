@@ -108,37 +108,42 @@ def auth_whoami(principal: auth.Principal = Depends(auth.require_principal)):
 
 
 @app.get("/ledger/balances")
-def ledger_balances():
+def ledger_balances(principal: auth.Principal = Depends(auth.require_role("viewer"))):
     s = ledger_db.SessionLocal()
     try:
-        return ledger_service.balances(s, "demo")
+        return ledger_service.balances(s, principal.tenant)
     finally:
         s.close()
 
 
 @app.get("/ledger/audit")
-def ledger_audit(limit: int = 50):
+def ledger_audit(limit: int = 50, principal: auth.Principal = Depends(auth.require_role("viewer"))):
     s = ledger_db.SessionLocal()
     try:
-        return {"events": ledger_service.audit_trail(s, "demo", max(0, min(limit, 200)))}
+        return {"events": ledger_service.audit_trail(s, principal.tenant, max(0, min(limit, 200)))}
     finally:
         s.close()
 
 
 @app.get("/review/queue")
-def review_queue(status: str = "open"):
+def review_queue(status: str = "open",
+                 principal: auth.Principal = Depends(auth.require_role("viewer"))):
     s = ledger_db.SessionLocal()
     try:
-        return {"items": ledger_review.review_queue(s, "demo", status)}
+        return {"items": ledger_review.review_queue(s, principal.tenant, status)}
     finally:
         s.close()
 
 
 @app.post("/review/{exc_id}/resolve")
-def review_resolve(exc_id: int, req: ResolveRequest):
+def review_resolve(exc_id: int, req: ResolveRequest,
+                   principal: auth.Principal = Depends(auth.require_role("reviewer"))):
     s = ledger_db.SessionLocal()
     try:
-        return ledger_review.resolve(s, "demo", exc_id, req.action, req.corrected, req.chosen_claim)
+        return ledger_review.resolve(s, principal.tenant, exc_id, req.action,
+                                     req.corrected, req.chosen_claim, reviewer=principal.sub)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
@@ -146,10 +151,10 @@ def review_resolve(exc_id: int, req: ResolveRequest):
 
 
 @app.get("/review/feedback")
-def review_feedback():
+def review_feedback(principal: auth.Principal = Depends(auth.require_role("viewer"))):
     s = ledger_db.SessionLocal()
     try:
-        return {"feedback": ledger_review.feedback_list(s, "demo")}
+        return {"feedback": ledger_review.feedback_list(s, principal.tenant)}
     finally:
         s.close()
 
