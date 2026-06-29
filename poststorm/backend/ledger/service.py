@@ -176,3 +176,23 @@ def rebuild_projections(session, tenant_id) -> None:
         acc = session.get(Account, e.account_id)
         acc.balance_cents += e.amount_cents if e.direction == "credit" else -e.amount_cents
     session.commit()
+
+
+def post_reviewed_line(session, tenant_id, batch_id, line, as_recoup, chosen_claim, reviewer):
+    lk = line_key(tenant_id, line)
+    if session.query(PostedLine).filter_by(tenant_id=tenant_id, line_key=lk).first():
+        return None
+    meta = {"payer": line.payer, "patient": line.patient_ref, "reviewer": reviewer}
+    if as_recoup:
+        meta["offset_original_claim"] = chosen_claim
+        cents = abs(to_cents(line.paid))
+        ev = _event(session, tenant_id, batch_id, "recoup", line, lk, meta)
+        _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "debit", cents, "reviewed recoup")
+        _entry(session, ev, _account(session, tenant_id, "dump_account", line.check_number), "credit", cents, "parked offset")
+    else:
+        cents = to_cents(line.paid)
+        ev = _event(session, tenant_id, batch_id, "payment", line, lk, meta)
+        _entry(session, ev, _account(session, tenant_id, "provider_cash", "main"), "debit", cents, "reviewed payment")
+        _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "credit", cents, "payment posted")
+    session.commit()
+    return ev.id
