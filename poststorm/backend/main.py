@@ -1,5 +1,6 @@
 import glob
 import json
+import secrets
 import uuid
 from pathlib import Path
 
@@ -40,7 +41,7 @@ _origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 app.mount("/eobs", StaticFiles(directory=str(EOBS)), name="eobs")
@@ -62,7 +63,9 @@ except Exception:
     log.warning("tenant seeding failed; /auth/token may not work this run", exc_info=True)
 
 
-JOBS: dict[str, list[str]] = {}
+JOBS: dict[str, tuple[str, list[str]]] = {}
+STREAM_TICKETS: dict[str, tuple[str, str]] = {}  # ticket -> (jid, tenant); single-use
+MAX_TICKETS = 256
 
 
 class JobRequest(BaseModel):
@@ -188,7 +191,7 @@ def index():
 
 
 @app.post("/jobs")
-def create_job(req: JobRequest):
+def create_job(req: JobRequest, principal: auth.Principal = Depends(auth.require_role("reviewer"))):
     n = min(req.count, settings.max_batch)
     paths = _full_pngs()[:n]
     meta = _doc_meta()
@@ -206,19 +209,26 @@ def create_job(req: JobRequest):
     jid = uuid.uuid4().hex[:8]
     if len(JOBS) >= MAX_JOBS:
         JOBS.pop(next(iter(JOBS)))  # evict oldest
-    JOBS[jid] = paths
-    log.info("job created id=%s count=%d", jid, len(paths))
-    return {"job_id": jid, "count": len(paths), "docs": docs}
+    JOBS[jid] = (principal.tenant, paths)
+    ticket = secrets.token_urlsafe(16)
+    if len(STREAM_TICKETS) >= MAX_TICKETS:
+        STREAM_TICKETS.pop(next(iter(STREAM_TICKETS)))
+    STREAM_TICKETS[ticket] = (jid, principal.tenant)
+    log.info("job created id=%s tenant=%s count=%d", jid, principal.tenant, len(paths))
+    return {"job_id": jid, "count": len(paths), "docs": docs, "stream_ticket": ticket}
 
 
 @app.get("/jobs/{jid}/stream")
-async def stream(jid: str):
-    if jid not in JOBS:
+async def stream(jid: str, ticket: str = ""):
+    bound = STREAM_TICKETS.pop(ticket, None)  # single-use: consume on read
+    if bound is None or bound[0] != jid or jid not in JOBS:
         raise HTTPException(status_code=404, detail="job not found")
-    paths = JOBS[jid]
+    tenant, paths = JOBS[jid]
+    if bound[1] != tenant:
+        raise HTTPException(status_code=404, detail="job not found")
 
     async def gen():
-        async for ev in run_job(paths):
+        async for ev in run_job(tenant, paths):
             yield f"data: {json.dumps(ev)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
