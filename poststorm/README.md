@@ -145,7 +145,7 @@ POST /auth/token   {"api_key": "pk_acme_..."}
 
 The returned token is a **short-lived HS256 JWT** (`{sub: kid, tenant, role, iat, exp}`; default TTL 1800 s).  
 Send it as `Authorization: Bearer <jwt>` on every data request.  
-Missing, invalid, or expired tokens → **401**; insufficient role → **403**.
+Missing, invalid, or expired tokens → **401** (with `WWW-Authenticate: Bearer` so clients can detect the scheme); insufficient role → **403**.
 
 ### Roles
 
@@ -181,7 +181,7 @@ POST   /admin/tenants/{tenant_id}/keys    # rotate / issue additional keys
 DELETE /admin/keys/{kid}                  # revoke a key immediately
 ```
 
-All three are admin-only and return the new `api_key` in the response (shown once).
+All three are admin-only. The two `POST` endpoints return the new `api_key` in the response (shown once — never retrievable again); `DELETE` returns a revocation confirmation, not a key.
 
 ### Demo & development
 
