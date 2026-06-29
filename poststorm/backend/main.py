@@ -6,7 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 from backend import auth, ratelimit
 from backend.config import get_settings
-from backend.ingest import queue as ingest_queue  # noqa: F401  # registers tables; used by Task 7 upload
+from backend.ingest import queue as ingest_queue
+from backend.ingest import storage as ingest_storage
 from backend.ingest import worker as ingest_worker
 from backend.ingest.models import Document, IngestJob
 from backend.jobs import run_job
@@ -98,10 +99,19 @@ STREAM_TICKETS: dict[str, tuple[str, str]] = {}  # ticket -> (jid, tenant); sing
 MAX_TICKETS = 256
 
 
+def _new_stream_ticket(job_id: str, tenant: str) -> str:
+    ticket = secrets.token_urlsafe(16)
+    if len(STREAM_TICKETS) >= MAX_TICKETS:
+        STREAM_TICKETS.pop(next(iter(STREAM_TICKETS)))
+    STREAM_TICKETS[ticket] = (job_id, tenant)
+    return ticket
+
+
 _AUDIT_ACTIONS = {
     ("POST", "/auth/token"): "auth.token",
     ("POST", "/jobs"): "job.create",
     ("POST", "/admin/tenants"): "tenant.create",
+    ("POST", "/documents"): "document.upload",
 }
 
 
@@ -249,6 +259,31 @@ def ingest_job_status(job_id: str,
         s.close()
 
 
+@app.post("/documents")
+async def upload_documents(files: list[UploadFile] = File(...),
+                           principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                           _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        specs = []
+        for f in files:
+            data = await f.read()
+            try:
+                blob = ingest_storage.save_upload(principal.tenant, f.filename or "upload", data)
+            except ingest_storage.UploadError as e:
+                raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+            specs.append(ingest_queue.DocSpec(
+                doc_id=blob.doc_id, filename=ingest_storage._safe_name(f.filename or "upload"),
+                content_type=blob.content_type, storage_path=blob.storage_path))
+        job_id = ingest_queue.enqueue_job(s, principal.tenant, specs)
+        docs = s.query(Document).filter_by(job_id=job_id).all()
+        return {"job_id": job_id,
+                "documents": [{"id": d.id, "filename": d.filename, "status": d.status} for d in docs],
+                "stream_ticket": _new_stream_ticket(job_id, principal.tenant)}
+    finally:
+        s.close()
+
+
 @app.middleware("http")
 async def audit_log(request: Request, call_next):
     resp = await call_next(request)
@@ -256,7 +291,8 @@ async def audit_log(request: Request, call_next):
     path = request.url.path
     action = _audit_action(method, path)
     is_auth_token = (method == "POST" and path == "/auth/token")
-    if method in _AUDITED_METHODS and (path.startswith(("/jobs", "/review/", "/admin/")) or is_auth_token):
+    if method in _AUDITED_METHODS and (
+        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/")) or is_auth_token):
         principal = getattr(request.state, "principal", None)
         s = ledger_db.SessionLocal()
         try:
