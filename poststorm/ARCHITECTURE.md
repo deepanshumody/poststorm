@@ -42,6 +42,7 @@
 | `main.py` | HTTP/SSE shell, validation, headers | jobs, config | network |
 | `logging_config.py` | structured stdlib logging | config | stderr |
 | **`ledger/`** | **durable event-sourced double-entry ledger** | SQLAlchemy, schema | DB |
+| `ledger/review.py` | review queue + resolve actions (approve / pick / correct / dismiss) | ledger/service, models | DB |
 
 **The core is pure, the shell is thin.** `reconcile.py` has no I/O and is the most heavily unit-tested module — the
 catastrophic-exception-prone money math is deterministic, not model-driven. This mirrors the "deterministic agents win at
@@ -64,6 +65,26 @@ Key design decisions:
 
 Storage: SQLite by default (`data/ledger.db`, volume-mounted in Docker via `ledger-data`); Postgres via `DATABASE_URL`.  
 Endpoints: `GET /ledger/balances` (current balances), `GET /ledger/audit` (raw event log).
+
+## Human-in-the-loop review
+
+Some lines cannot be safely auto-posted: a recoup whose amount matches more than one payment (**ambiguous**) and a
+payment line the model marks **low-confidence**. Both are written as `ReviewException` rows
+(kind = `ambiguous` | `low_confidence`) and held out of the main ledger until a human acts.
+
+**Resolution** (`ledger/review.py`): four actions — **approve** (post as-is), **pick** (choose which candidate
+payment an ambiguous recoup offsets), **correct** (edit a field and post the adjusted line), **dismiss** (drop
+the line, post nothing). Resolved lines flow through `service.post_reviewed_line`, emitting a normal append-only
+ledger event tagged with the `reviewer` string. Resolving an already-resolved exception is an idempotent no-op.
+
+**Separation of concerns:** the `ReviewException` row is a **mutable work-item** (status `open → resolved /
+dismissed`); the ledger event log remains immutable append-only fact. A line only becomes ledger fact once a
+human (or the auto path for unambiguous high-confidence lines) signs off on it.
+
+**Feedback seam:** every `correct` action records a `Feedback` row (original vs. corrected line + reviewer).
+The pairs are stored for future use — not yet consumed for retraining.
+
+> No auth/RBAC yet — reviewer identity is the string in the request body.
 
 ## Recoupment detection (the core insight)
 

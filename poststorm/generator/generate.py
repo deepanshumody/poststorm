@@ -379,7 +379,7 @@ def _stamp(seed):
     return layer.rotate(rng.uniform(-15, -7), expand=True, resample=Image.BICUBIC)
 
 
-def scannify(img, template, seed):
+def scannify(img, template, seed, degraded=False):
     rng = random.Random(seed)
     # Mailroom stamp dropped into clear lower-right whitespace (off the claim data).
     if template in ("medicare", "uhc"):
@@ -391,12 +391,16 @@ def scannify(img, template, seed):
     img = Image.composite(Image.new("RGB", img.size, (0, 0, 0)), img, fold.filter(ImageFilter.GaussianBlur(3)))
     if template == "medicare":
         # Authentic monochrome line-printer output.
-        g = img.convert("L").filter(ImageFilter.GaussianBlur(0.45))
-        g = Image.blend(g, Image.effect_noise(g.size, 12), rng.uniform(0.04, 0.06))
+        blur_r = 1.4 if degraded else 0.45
+        noise_blend = 0.12 if degraded else rng.uniform(0.04, 0.06)
+        g = img.convert("L").filter(ImageFilter.GaussianBlur(blur_r))
+        g = Image.blend(g, Image.effect_noise(g.size, 12), noise_blend)
         return Image.merge("RGB", (g, g, g)).point(lambda v: int(min(255, v * rng.uniform(0.97, 1.03))))
     # Color scan: keep payer branding, add grain + soft blur + slight gamma drift.
-    img = img.filter(ImageFilter.GaussianBlur(0.4))
-    img = Image.blend(img, Image.effect_noise(img.size, 10).convert("RGB"), rng.uniform(0.035, 0.05))
+    blur_r = 1.4 if degraded else 0.4
+    noise_blend = 0.12 if degraded else rng.uniform(0.035, 0.05)
+    img = img.filter(ImageFilter.GaussianBlur(blur_r))
+    img = Image.blend(img, Image.effect_noise(img.size, 10).convert("RGB"), noise_blend)
     return img.point(lambda v: int(min(255, v * rng.uniform(0.98, 1.02))))
 
 
@@ -411,26 +415,31 @@ def _validate(case):
     if not case["has_planted_recoup"]:
         return
     rr = reconcile([LineItem(**ln) for ln in case["lines"]])
-    cross = [x for x in rr.recoups if x.status == "matched" and x.cross_patient]
-    assert len(cross) == 1, f"{case['doc_id']}: expected 1 cross recoup, got {len(cross)}"
+    if case.get("ambiguous"):
+        nr = [x for x in rr.recoups if x.status == "needs_review" and len(x.candidates) >= 2]
+        assert len(nr) == 1, f"{case['doc_id']}: expected 1 needs_review recoup with ≥2 candidates, got {nr}"
+    else:
+        cross = [x for x in rr.recoups if x.status == "matched" and x.cross_patient]
+        assert len(cross) == 1, f"{case['doc_id']}: expected 1 cross recoup, got {len(cross)}"
     paid = sum(c["paid"] for c in case["claims"])
     assert abs((paid - case["recoup"]["amount"]) - case["check_amt"]) < 0.01, f"{case['doc_id']}: check doesn't foot"
 
 
-def main(n=24, recoup_cases=3, seed=7):
+def main(n=24, recoup_cases=3, seed=7, ambiguous_cases=1):
     (OUT / "eobs").mkdir(parents=True, exist_ok=True)
-    cases = build_cases(n, recoup_cases, seed)
+    cases = build_cases(n, recoup_cases, seed, ambiguous_cases)
     truth = []
     for i, c in enumerate(cases):
         _validate(c)
         base, box = DRAW[c["template"]](c, random.Random(seed + i))
-        img = scannify(base, c["template"], seed + i)
+        img = scannify(base, c["template"], seed + i, degraded=c.get("degraded", False))
         img.save(OUT / "eobs" / f"{c['doc_id']}.png")
         save_pdf(img, OUT / "eobs" / f"{c['doc_id']}.pdf")
         th = img.copy(); th.thumbnail((260, 340)); th.save(OUT / "eobs" / f"{c['doc_id']}.thumb.png")
         rc = c["recoup"]
         truth.append({
             "doc_id": c["doc_id"], "template": c["template"], "has_planted_recoup": c["has_planted_recoup"],
+            "ambiguous": c.get("ambiguous", False), "degraded": c.get("degraded", False),
             "payer": c["payer_str"], "check_number": c["check_number"], "recoup_box": box,
             "recoup_text": (f"{rc['patient_b']}  -{rc['amount']:.2f}" if rc else None),
             "lines": c["lines"],
@@ -440,7 +449,10 @@ def main(n=24, recoup_cases=3, seed=7):
     for c in cases:
         by_t[c["template"]] = by_t.get(c["template"], 0) + 1
     planted = sum(1 for t in truth if t["has_planted_recoup"])
-    print(f"Generated {len(cases)} EOBs across {by_t}; {planted} planted recoups. Validation passed.")
+    ambiguous = sum(1 for t in truth if t["ambiguous"])
+    degraded = sum(1 for t in truth if t["degraded"])
+    print(f"Generated {len(cases)} EOBs across {by_t}; {planted} planted recoups "
+          f"({ambiguous} ambiguous, {degraded} degraded). Validation passed.")
 
 
 if __name__ == "__main__":

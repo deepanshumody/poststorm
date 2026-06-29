@@ -120,7 +120,7 @@ def _line(c, payer_str, check):
     }
 
 
-def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
+def build_cases(n: int, recoup_cases: int, seed: int, ambiguous_cases: int = 1) -> list[dict]:
     rng = random.Random(seed)
     # Spread planted recoups across DISTINCT templates so each shows its own recoup
     # rendering (Medicare PLB WO / UHC Provider-Level Adj / Cigna recoupment box / Aetna band).
@@ -132,6 +132,22 @@ def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
         if t not in used_t:
             recoup_idxs.add(i)
             used_t.add(t)
+
+    # Choose ambiguous indices: distinct from recoup indices, with room for 2 degraded followers.
+    # Selection is deterministic (first valid indices) to avoid extra rng calls before the main loop.
+    ambig_idxs: set[int] = set()
+    for i in range(n - 2):
+        if len(ambig_idxs) >= ambiguous_cases:
+            break
+        if i not in recoup_idxs and (i + 1) not in recoup_idxs and (i + 2) not in recoup_idxs:
+            ambig_idxs.add(i)
+
+    # Two indices following each ambiguous index are marked degraded.
+    degraded_idxs: set[int] = set()
+    for ai in ambig_idxs:
+        degraded_idxs.add(ai + 1)
+        degraded_idxs.add(ai + 2)
+
     cases = []
     for i in range(n):
         template = TEMPLATES[i % len(TEMPLATES)]
@@ -153,6 +169,9 @@ def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
         check = ("EFT" + str(rng.randint(1000000, 9999999))) if template == "uhc" else str(rng.randint(1000000, 99999999))
         cdate = f"01/{rng.randint(20, 28):02d}/2026"
 
+        is_ambiguous = i in ambig_idxs
+        is_degraded = i in degraded_idxs
+
         claims = [_claim(rng, payer_key, check, rng.randint(2, 26), medicare) for _ in range(rng.randint(2, 3))]
         # keep patient names distinct within the doc
         seen = set()
@@ -160,6 +179,11 @@ def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
             while c["patient"] in seen:
                 c["patient"] = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
             seen.add(c["patient"])
+
+        # For ambiguous docs: force claims[0] and claims[1] to have the same paid amount so that
+        # reconcile finds two cross-patient candidates and emits needs_review.
+        if is_ambiguous:
+            claims[1]["paid"] = claims[0]["paid"]
 
         lines = [_line(c, payer_str, check) for c in claims]
         recoup = None
@@ -189,11 +213,38 @@ def build_cases(n: int, recoup_cases: int, seed: int) -> list[dict]:
                 "source_span": f"WO overpayment recovery {pb} -{X:.2f}",
             })
 
+        if is_ambiguous:
+            # Plant ambiguous recoup: same amount as claims[0]["paid"] but for a third patient,
+            # creating two cross-patient candidates so reconcile emits needs_review.
+            # ambiguous doc draws extra rng (names/ids) — intentionally advances the sequence for later docs
+            X = claims[0]["paid"]
+            pb = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
+            while pb in seen:
+                pb = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
+            seen.add(pb)
+            prior_icn = _icn(rng)
+            recoup = {
+                "patient_b": pb, "mbi_b": _mbi(rng), "member_b": _member(rng, payer_key == "bcbs"),
+                "acct_b": f"{rng.choice(['RIV','LAK','SUM'])}-{rng.randint(1000,9999)}",
+                "amount": X, "prior_icn": prior_icn,
+                "fcn": f"21{rng.randint(10,39)}R{rng.randint(1000000,9999999)}",
+                "nb_id": f"NB-2026-{rng.randint(10000,99999)}", "date": cdate,
+            }
+            lines.append({
+                "claim_id": prior_icn, "payer": payer_str, "patient_ref": pb,
+                "service_date": cdate.replace("01/", "2026-01-").replace("/2026", ""),
+                "carc": None, "rarc": ["N469"], "charge": X, "allowed": X, "paid": -X,
+                "adjustment": X, "patient_responsibility": 0.0, "event_type": "recoup",
+                "recoup_flag": True, "offset_link": None, "check_number": check, "confidence": "high",
+                "source_span": f"WO overpayment recovery {pb} -{X:.2f}",
+            })
+
         check_amt = round(sum(c["paid"] for c in claims) - (recoup["amount"] if recoup else 0), 2)
         cases.append({
             "doc_id": f"eob_{i:03d}", "template": template, "payer_key": payer_key,
             "payer_str": payer_str, "mac": mac, "payer_meta": PAYERS.get(payer_key, {}),
             "provider": prov, "check_number": check, "check_date": cdate, "check_amt": check_amt,
-            "has_planted_recoup": planted, "claims": claims, "recoup": recoup, "lines": lines,
+            "has_planted_recoup": planted or is_ambiguous, "claims": claims, "recoup": recoup,
+            "lines": lines, "ambiguous": is_ambiguous, "degraded": is_degraded,
         })
     return cases

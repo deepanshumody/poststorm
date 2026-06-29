@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.config import get_settings
 from backend.ledger.models import Account, Entry, Event, PostedLine, ReviewException
 from backend.ledger.money import to_cents
-from backend.schema import EventType, LineItem
+from backend.schema import Confidence, EventType, LineItem
 
 
 @dataclass
@@ -78,29 +78,33 @@ def _post_reversal(session, tenant_id, batch_id, line, lk):
     _entry(session, ev, _account(session, tenant_id, "provider_cash", "main"), "credit", cents, "cash reduced")
 
 
-def _exception(session, tenant_id, lk, kind, line):
-    session.add(ReviewException(tenant_id=tenant_id, line_key=lk, kind=kind,
-                payload=json.dumps({"claim": line.claim_id, "patient": line.patient_ref, "paid": line.paid})))
+def _exception(session, tenant_id, lk, kind, line, candidates=None):
+    payload = {"line": line.model_dump(mode="json"), "reason": kind, "candidates": candidates or []}
+    session.add(ReviewException(tenant_id=tenant_id, line_key=lk, kind=kind, payload=json.dumps(payload)))
     session.add(PostedLine(tenant_id=tenant_id, line_key=lk, event_id=None))
 
 
+def _is_low_conf(line) -> bool:
+    return line.confidence == Confidence.low
+
+
 def _route_recoup(session, tenant_id, batch_id, line, r, lk, res):
-    if r and r.cross_patient:
+    if r and r.status == "matched" and r.cross_patient:
         _post_recoup(session, tenant_id, batch_id, line, r, lk)
         res.events += 1
         res.posted += 1
-    elif r and not r.cross_patient:
+    elif r and r.status == "matched" and not r.cross_patient:
         _post_reversal(session, tenant_id, batch_id, line, lk)
         res.events += 1
         res.posted += 1
     else:
-        _exception(session, tenant_id, lk, "ambiguous", line)
+        _exception(session, tenant_id, lk, "ambiguous", line, r.candidates if r else [])
         res.exceptions += 1
 
 
 def post(session, tenant_id, batch_id, lines, recoups) -> PostingResult:
     res = PostingResult()
-    matched = {r.recoup_claim_id: r for r in recoups if r.status == "matched"}
+    recoup_map = {r.recoup_claim_id: r for r in recoups}
     for line in lines:
         lk = line_key(tenant_id, line)
         if session.query(PostedLine).filter_by(tenant_id=tenant_id, line_key=lk).first():
@@ -108,11 +112,15 @@ def post(session, tenant_id, batch_id, lines, recoups) -> PostingResult:
             continue
         try:
             if _is_recoup(line):
-                _route_recoup(session, tenant_id, batch_id, line, matched.get(line.claim_id), lk, res)
+                _route_recoup(session, tenant_id, batch_id, line, recoup_map.get(line.claim_id), lk, res)
             elif line.paid > 0:
-                _post_payment(session, tenant_id, batch_id, line, lk)
-                res.events += 1
-                res.posted += 1
+                if _is_low_conf(line):
+                    _exception(session, tenant_id, lk, "low_confidence", line)
+                    res.exceptions += 1
+                else:
+                    _post_payment(session, tenant_id, batch_id, line, lk)
+                    res.events += 1
+                    res.posted += 1
             else:
                 res.skipped += 1
             session.commit()
@@ -168,3 +176,23 @@ def rebuild_projections(session, tenant_id) -> None:
         acc = session.get(Account, e.account_id)
         acc.balance_cents += e.amount_cents if e.direction == "credit" else -e.amount_cents
     session.commit()
+
+
+def post_reviewed_line(session, tenant_id, batch_id, line, as_recoup, chosen_claim, reviewer) -> int | None:
+    lk = line_key(tenant_id, line)
+    if session.query(PostedLine).filter_by(tenant_id=tenant_id, line_key=lk).first():
+        return None
+    meta = {"payer": line.payer, "patient": line.patient_ref, "reviewer": reviewer}
+    if as_recoup:
+        meta["offset_original_claim"] = chosen_claim
+        cents = abs(to_cents(line.paid))
+        ev = _event(session, tenant_id, batch_id, "recoup", line, lk, meta)
+        _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "debit", cents, "reviewed recoup")
+        _entry(session, ev, _account(session, tenant_id, "dump_account", line.check_number), "credit", cents, "parked offset")
+    else:
+        cents = to_cents(line.paid)
+        ev = _event(session, tenant_id, batch_id, "payment", line, lk, meta)
+        _entry(session, ev, _account(session, tenant_id, "provider_cash", "main"), "debit", cents, "reviewed payment")
+        _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "credit", cents, "payment posted")
+    session.commit()
+    return ev.id

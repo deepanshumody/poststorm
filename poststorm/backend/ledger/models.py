@@ -64,3 +64,17 @@ class ReviewException(Base):
     payload: Mapped[str] = mapped_column(String, default="{}")
     status: Mapped[str] = mapped_column(String, default="open")
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class Feedback(Base):
+    __tablename__ = "feedback"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, default="demo")
+    kind: Mapped[str] = mapped_column(String)
+    original_line: Mapped[str] = mapped_column(String)
+    corrected_line: Mapped[str] = mapped_column(String)
+    reviewer: Mapped[str] = mapped_column(String, default="demo-reviewer")
+    created_at: Mapped[datetime] = mapped_column(default=_now)
