@@ -25,6 +25,7 @@ from backend.ledger import service as ledger_service
 from backend.ledger.models import AuditLog, _now
 from backend.logging_config import get_logger
 from backend.writeback import worker as wb_worker
+from backend.writeback.models import Delivery
 
 ROOT = Path(__file__).resolve().parents[1]
 EOBS = ROOT / "data" / "eobs"
@@ -127,6 +128,8 @@ def _audit_action(method: str, path: str) -> str:
         return _AUDIT_ACTIONS[(method, path)]
     if method == "POST" and path.startswith("/ingest/documents/") and path.endswith("/retry"):
         return "document.retry"
+    if method == "POST" and path.startswith("/writeback/deliveries/") and path.endswith("/retry"):
+        return "writeback.retry"
     if method == "POST" and path.startswith("/review/") and path.endswith("/resolve"):
         return "review.resolve"
     if method == "POST" and path.startswith("/admin/tenants/") and path.endswith("/keys"):
@@ -337,6 +340,44 @@ def ingest_retry_document(doc_id: str,
         s.close()
 
 
+@app.get("/writeback/deliveries")
+def writeback_deliveries(status: str | None = None,
+                         principal: auth.Principal = Depends(auth.require_role("viewer")),
+                         _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        q = s.query(Delivery).filter_by(tenant_id=principal.tenant)
+        if status:
+            q = q.filter_by(status=status)
+        rows = q.order_by(Delivery.id.desc()).limit(200)
+        return {"deliveries": [{"id": d.id, "event_id": d.event_id, "destination": d.destination,
+                                "status": d.status, "attempts": d.attempts, "last_error": d.last_error,
+                                "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None}
+                               for d in rows]}
+    finally:
+        s.close()
+
+
+@app.post("/writeback/deliveries/{delivery_id}/retry")
+def writeback_retry(delivery_id: int,
+                    principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                    _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        d = s.get(Delivery, delivery_id)
+        if d is None or d.tenant_id != principal.tenant:
+            raise HTTPException(status_code=404, detail="delivery not found")
+        if d.status in ("dead", "failed"):
+            d.status = "pending"
+            d.attempts = 0
+            d.last_error = None
+            d.updated_at = _now()
+            s.commit()
+        return {"id": d.id, "status": d.status}
+    finally:
+        s.close()
+
+
 @app.get("/ingest/jobs/{job_id}/stream")
 async def ingest_job_stream(job_id: str, ticket: str = ""):
     bound = STREAM_TICKETS.pop(ticket, None)  # single-use
@@ -378,7 +419,7 @@ async def audit_log(request: Request, call_next):
     action = _audit_action(method, path)
     is_auth_token = (method == "POST" and path == "/auth/token")
     if method in _AUDITED_METHODS and (
-        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/")) or is_auth_token):
+        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/", "/writeback/")) or is_auth_token):
         principal = getattr(request.state, "principal", None)
         s = ledger_db.SessionLocal()
         try:
