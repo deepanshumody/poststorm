@@ -9,3 +9,4 @@ pymupdf==1.27.2.3
 python-dotenv==1.2.2
 pytest==9.1.1
 sqlalchemy==2.0.51
+PyJWT==2.10.1
