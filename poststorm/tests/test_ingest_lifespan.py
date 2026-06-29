@@ -68,18 +68,12 @@ def test_lifespan_workers_drain_the_queue(monkeypatch):
     assert status == "finalized"
 
 
-def test_bare_testclient_starts_no_workers():
-    # The existing-test pattern (no `with`) must NOT spawn workers — proves the suite stays hermetic.
-    s = ledger_db.SessionLocal()
-    jid = q.enqueue_job(s, "demo", [q.DocSpec("d_nobg", "f.png", "image/png", "/tmp/does-not-exist.png")])
-    s.close()
-    _ = TestClient(app)  # no `with` → lifespan does not run
-    time.sleep(0.5)
-    s = ledger_db.SessionLocal()
-    try:
-        # the doc is untouched (still pending) because no worker is running
-        from backend.ingest.models import Document
-        assert s.get(Document, "d_nobg").status == "pending"
-        assert s.get(IngestJob, jid).status == "pending"
-    finally:
-        s.close()
+def test_bare_testclient_starts_no_workers(monkeypatch):
+    # Hermetic property: a bare TestClient(app) (no `with`) must NOT run the lifespan,
+    # so the ingest workers — and the recover_orphans call that precedes them — never start.
+    # Spying on recover_orphans is robust even when a dev server shares the SQLite file.
+    calls = []
+    monkeypatch.setattr("backend.ingest.worker.recover_orphans", lambda s: calls.append(1))
+    _ = TestClient(app)            # no `with` → lifespan does not run
+    time.sleep(0.2)
+    assert calls == []            # lifespan never started → no workers spawned
