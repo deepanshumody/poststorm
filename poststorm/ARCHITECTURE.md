@@ -59,7 +59,7 @@ Key design decisions:
 - **Append-only events** — rows are never updated or deleted; the audit trail is immutable.
 - **Balanced double-entry** — every posting emits a debit entry and a matching credit entry; the two sides always sum to zero, so the ledger self-validates.
 - **Rebuildable projections** — running balances (`account_balance`) are derived projections rebuilt from raw events; calling `rebuild_projections()` at any time regenerates them from scratch.
-- **Idempotent on `line_key`** — each ledger line carries a deterministic composite key (tenant + batch + claim); duplicate postings (e.g. a retry) hit a `UNIQUE` constraint and are silently skipped via `IntegrityError` handling.
+- **Idempotent on `line_key`** — each ledger line carries a deterministic composite key (tenant + check_number + claim_id + patient_ref + paid_cents — note: **not** the run/batch id, so the same line re-posted in a later batch is recognized as a duplicate and skipped via the `UNIQUE` constraint / `IntegrityError` handling).
 - **Integer cents** — all amounts are stored as integer cents to avoid floating-point rounding drift.
 
 Storage: SQLite by default (`data/ledger.db`, volume-mounted in Docker via `ledger-data`); Postgres via `DATABASE_URL`.  

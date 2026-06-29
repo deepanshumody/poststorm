@@ -91,7 +91,7 @@ Two read endpoints expose its state:
 | Endpoint | Returns |
 |---|---|
 | `GET /ledger/balances` | Running balance per account (provider cash, claims, dump account) as integer cents. |
-| `GET /ledger/audit` | Append-only event log — one row per posted ledger line, with tenant, batch, account, debit/credit, and `line_key`. |
+| `GET /ledger/audit` | Append-only event log — each event with its type, batch id, model + confidence provenance, `source_span`, and its balanced debit/credit entries. |
 
 Storage defaults to **SQLite** (`data/ledger.db`; persisted in Docker via the `ledger-data` named volume).  
 Override with **Postgres** by setting `DATABASE_URL=postgresql+psycopg2://...` in your `.env`.
