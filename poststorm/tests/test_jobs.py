@@ -30,7 +30,7 @@ def _run(paths, monkeypatch, fail=False):
     monkeypatch.setattr(images, "image_to_data_uri", lambda img, **kw: "data:image/png;base64,AA==")
 
     async def go():
-        return [ev async for ev in jobs.run_job(paths)]
+        return [ev async for ev in jobs.run_job("demo", paths)]
 
     return asyncio.run(go())
 

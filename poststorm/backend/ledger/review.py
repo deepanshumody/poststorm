@@ -28,7 +28,7 @@ def resolve(session, tenant_id, exc_id, action, corrected=None, chosen_claim=Non
             reviewer="demo-reviewer"):
     ex = session.get(ReviewException, exc_id)
     if ex is None or ex.tenant_id != tenant_id:
-        raise ValueError("exception not found")
+        raise LookupError("exception not found")
     if ex.status != "open":
         return {"status": ex.status, "posted": False, "event_id": None, "noop": True}
 

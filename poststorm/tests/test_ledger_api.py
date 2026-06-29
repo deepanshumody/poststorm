@@ -1,8 +1,6 @@
-from fastapi.testclient import TestClient
+from tests._auth import authed_client
 
-from backend.main import app
-
-client = TestClient(app)
+client = authed_client(role="viewer")
 
 
 def test_balances_endpoint_shape():

@@ -18,7 +18,7 @@ def _stem(path: str) -> str:
     return path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
 
 
-async def run_job(paths: list[str]):
+async def run_job(tenant: str, paths: list[str]):
     """Dual-provider race. Both lanes process the same pre-rendered images.
     Cerebras drives the posting grid / ledger / climax; Gemini is the GPU baseline.
     When Cerebras clears the batch we stop the (slower) Gemini lane and report how
@@ -84,7 +84,7 @@ async def run_job(paths: list[str]):
                         sess = ledger_db.SessionLocal()
                         try:
                             pr = await asyncio.to_thread(
-                                ledger_service.post, sess, "demo", uuid.uuid4().hex[:8], all_items, rr.recoups)
+                                ledger_service.post, sess, tenant, uuid.uuid4().hex[:8], all_items, rr.recoups)
                             sor = {"posted": pr.posted, "skipped": pr.skipped, "exceptions": pr.exceptions,
                                    "events": pr.events, "dump_exposure_cents": pr.dump_exposure_cents}
                         finally:

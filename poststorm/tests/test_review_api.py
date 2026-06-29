@@ -1,14 +1,13 @@
 import pytest
-from fastapi.testclient import TestClient
 
 from backend.ledger import db as ledger_db
 from backend.ledger import service
 from backend.ledger.models import PostedLine, ReviewException
-from backend.main import app
 from backend.reconcile import reconcile
 from backend.schema import Confidence, EventType, LineItem
+from tests._auth import authed_client
 
-client = TestClient(app)
+client = authed_client(role="reviewer")
 
 
 @pytest.fixture(autouse=True)

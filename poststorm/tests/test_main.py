@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from tests._auth import authed_client
 
-client = TestClient(app)
+client = TestClient(app)            # unauthenticated — for open routes
+rc = authed_client(role="reviewer")  # reviewer — for /jobs
 
 
 def test_health_shape():
@@ -20,24 +22,61 @@ def test_security_headers_present():
     assert "content-security-policy" in h
 
 
-def test_jobs_valid_request():
-    r = client.post("/jobs", json={"count": 3})
+def test_jobs_requires_auth():
+    assert client.post("/jobs", json={"count": 3}).status_code == 401
+
+
+def test_jobs_viewer_forbidden():
+    viewer = authed_client(role="viewer")
+    assert viewer.post("/jobs", json={"count": 3}).status_code == 403
+
+
+def test_jobs_valid_request_returns_ticket():
+    r = rc.post("/jobs", json={"count": 3})
     assert r.status_code == 200
     j = r.json()
     assert j["count"] == 3 and len(j["docs"]) == 3 and "job_id" in j
+    assert "stream_ticket" in j and j["stream_ticket"]
 
 
 def test_jobs_rejects_non_numeric():
-    assert client.post("/jobs", json={"count": "abc"}).status_code == 422
+    assert rc.post("/jobs", json={"count": "abc"}).status_code == 422
 
 
 def test_jobs_rejects_too_large():
-    assert client.post("/jobs", json={"count": 999}).status_code == 422
+    assert rc.post("/jobs", json={"count": 999}).status_code == 422
 
 
 def test_jobs_rejects_zero():
-    assert client.post("/jobs", json={"count": 0}).status_code == 422
+    assert rc.post("/jobs", json={"count": 0}).status_code == 422
 
 
-def test_stream_unknown_job_is_404():
+def test_stream_without_ticket_is_404():
     assert client.get("/jobs/deadbeef/stream").status_code == 404
+
+
+def test_stream_with_bad_ticket_is_404():
+    assert client.get("/jobs/deadbeef/stream?ticket=nope").status_code == 404
+
+
+def test_stream_ticket_is_single_use_and_opens_stream(monkeypatch):
+    from backend import main
+
+    async def fake_run_job(tenant, paths):
+        yield {"type": "start", "total": 0}
+        yield {"type": "done", "elapsed_ms": 0, "errors": 0}
+
+    monkeypatch.setattr(main, "run_job", fake_run_job)
+
+    job = rc.post("/jobs", json={"count": 1}).json()
+    jid, ticket = job["job_id"], job["stream_ticket"]
+
+    # First use: valid ticket opens the SSE stream.
+    r1 = client.get(f"/jobs/{jid}/stream?ticket={ticket}")
+    assert r1.status_code == 200
+    assert r1.headers["content-type"].startswith("text/event-stream")
+    assert "data:" in r1.text
+
+    # Second use: the same ticket was consumed → 404 (single-use enforced).
+    r2 = client.get(f"/jobs/{jid}/stream?ticket={ticket}")
+    assert r2.status_code == 404

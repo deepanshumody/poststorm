@@ -17,6 +17,10 @@ ignore = ["E501", "UP042"]  # long lines OK in dense tables; str+Enum is intenti
 # Dense raster-layout toolkit: compact one-liners (semicolons) + short coords are intentional.
 "generator/*" = ["E741", "E702"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI DI defaults (Depends/Header/Query/Path) are the idiomatic pattern, not B008 bugs.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "fastapi.Path", "backend.auth.require_role"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
