@@ -16,6 +16,7 @@ from backend.jobs import run_job
 from backend.ledger import db as ledger_db
 from backend.ledger import review as ledger_review
 from backend.ledger import service as ledger_service
+from backend.ledger.models import AuditLog
 from backend.logging_config import get_logger
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +67,28 @@ except Exception:
 JOBS: dict[str, tuple[str, list[str]]] = {}
 STREAM_TICKETS: dict[str, tuple[str, str]] = {}  # ticket -> (jid, tenant); single-use
 MAX_TICKETS = 256
+
+
+_AUDIT_ACTIONS = {
+    ("POST", "/auth/token"): "auth.token",
+    ("POST", "/jobs"): "job.create",
+    ("POST", "/admin/tenants"): "tenant.create",
+}
+
+
+def _audit_action(method: str, path: str) -> str:
+    if (method, path) in _AUDIT_ACTIONS:
+        return _AUDIT_ACTIONS[(method, path)]
+    if method == "POST" and path.startswith("/review/") and path.endswith("/resolve"):
+        return "review.resolve"
+    if method == "POST" and path.startswith("/admin/tenants/") and path.endswith("/keys"):
+        return "key.issue"
+    if method == "DELETE" and path.startswith("/admin/keys/"):
+        return "key.revoke"
+    return f"{method} {path}"
+
+
+_AUDITED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 class JobRequest(BaseModel):
@@ -163,6 +186,29 @@ def review_feedback(principal: auth.Principal = Depends(auth.require_role("viewe
 
 
 @app.middleware("http")
+async def audit_log(request: Request, call_next):
+    resp = await call_next(request)
+    method = request.method
+    path = request.url.path
+    action = _audit_action(method, path)
+    is_auth_token = (method == "POST" and path == "/auth/token")
+    if method in _AUDITED_METHODS and (path.startswith(("/jobs", "/review/", "/admin/")) or is_auth_token):
+        principal = getattr(request.state, "principal", None)
+        s = ledger_db.SessionLocal()
+        try:
+            s.add(AuditLog(
+                tenant_id=(principal.tenant if principal else ""),
+                principal=(principal.sub if principal else ""),
+                action=action, resource=path, status_code=resp.status_code))
+            s.commit()
+        except Exception:
+            log.warning("audit write failed", exc_info=True)
+        finally:
+            s.close()
+    return resp
+
+
+@app.middleware("http")
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -183,6 +229,20 @@ def _doc_meta() -> dict:
 
 def _full_pngs() -> list[str]:
     return [p for p in sorted(glob.glob(str(EOBS / "*.png"))) if ".thumb." not in Path(p).name]
+
+
+@app.get("/admin/audit")
+def admin_audit(limit: int = 100,
+                principal: auth.Principal = Depends(auth.require_role("admin"))):
+    s = ledger_db.SessionLocal()
+    try:
+        rows = (s.query(AuditLog).filter_by(tenant_id=principal.tenant)
+                .order_by(AuditLog.id.desc()).limit(max(0, min(limit, 500))))
+        return {"events": [{"id": r.id, "action": r.action, "resource": r.resource,
+                            "principal": r.principal, "status_code": r.status_code,
+                            "created_at": r.created_at.isoformat()} for r in rows]}
+    finally:
+        s.close()
 
 
 @app.get("/")
