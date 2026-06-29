@@ -24,5 +24,6 @@ scratch/
 .claude/
 poststorm/.venv/
 poststorm/data/
+poststorm/data/uploads/
 poststorm/**/__pycache__/
 poststorm/.pytest_cache/
