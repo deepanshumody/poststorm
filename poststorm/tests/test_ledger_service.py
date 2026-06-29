@@ -113,3 +113,30 @@ def test_audit_trail_has_provenance():
     assert trail and trail[0]["type"] == "payment"
     assert trail[0]["source_span"] == "C1 Aetna 80.00"
     assert len(trail[0]["entries"]) == 2
+
+
+def test_ambiguous_recoup_creates_exception_with_candidates():
+    s = make_memory_session()
+    a = _li(claim_id="C1", patient_ref="P-A", paid=50.0, check_number="CHK7")
+    b = _li(claim_id="C2", patient_ref="P-B", paid=50.0, check_number="CHK7")
+    take = _li(claim_id="C3", patient_ref="P-C", paid=-50.0, check_number="CHK7",
+               event_type=EventType.recoup, recoup_flag=True)
+    rr = reconcile([a, b, take])
+    res = service.post(s, "demo", "b1", [a, b, take], rr.recoups)
+    assert res.exceptions == 1
+    import json
+    ex = s.query(__import__("backend.ledger.models", fromlist=["ReviewException"]).ReviewException).one()
+    assert ex.kind == "ambiguous"
+    payload = json.loads(ex.payload)
+    assert set(payload["candidates"]) == {"C1", "C2"}
+    assert payload["line"]["claim_id"] == "C3"
+
+
+def test_low_confidence_payment_goes_to_exception():
+    s = make_memory_session()
+    line = _li(claim_id="C1", paid=80.0, confidence=Confidence.low)
+    res = service.post(s, "demo", "b1", [line], [])
+    assert res.exceptions == 1 and res.posted == 0
+    from backend.ledger.models import Entry, ReviewException
+    assert s.query(Entry).count() == 0
+    assert s.query(ReviewException).one().kind == "low_confidence"
