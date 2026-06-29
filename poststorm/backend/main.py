@@ -1,7 +1,9 @@
+import asyncio
 import glob
 import json
 import secrets
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -12,6 +14,9 @@ from pydantic import BaseModel, Field
 
 from backend import auth, ratelimit
 from backend.config import get_settings
+from backend.ingest import queue as ingest_queue  # noqa: F401  # registers tables; used by Task 7 upload
+from backend.ingest import worker as ingest_worker
+from backend.ingest.models import Document, IngestJob
 from backend.jobs import run_job
 from backend.ledger import db as ledger_db
 from backend.ledger import review as ledger_review
@@ -36,7 +41,31 @@ def config_module_dev_secret() -> str:
 VERSION = "0.1.0"
 MAX_JOBS = 64  # bounded in-memory store (single-node demo; no external DB by design)
 
-app = FastAPI(title="PostStorm", version=VERSION)
+_worker_stop: asyncio.Event | None = None
+_worker_tasks: list = []
+
+
+@asynccontextmanager
+async def lifespan(app):
+    global _worker_stop, _worker_tasks
+    _s = ledger_db.SessionLocal()
+    try:
+        ingest_worker.recover_orphans(_s)
+    except Exception:
+        log.warning("orphan recovery failed", exc_info=True)
+    finally:
+        _s.close()
+    _worker_stop = asyncio.Event()
+    _worker_tasks = [asyncio.create_task(ingest_worker.worker_loop(_worker_stop))
+                     for _ in range(settings.ingest_workers)]
+    try:
+        yield
+    finally:
+        _worker_stop.set()
+        await asyncio.gather(*_worker_tasks, return_exceptions=True)
+
+
+app = FastAPI(title="PostStorm", version=VERSION, lifespan=lifespan)
 
 _origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
@@ -198,6 +227,24 @@ def review_feedback(principal: auth.Principal = Depends(auth.require_role("viewe
     s = ledger_db.SessionLocal()
     try:
         return {"feedback": ledger_review.feedback_list(s, principal.tenant)}
+    finally:
+        s.close()
+
+
+@app.get("/ingest/jobs/{job_id}")
+def ingest_job_status(job_id: str,
+                      principal: auth.Principal = Depends(auth.require_role("viewer")),
+                      _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        job = s.get(IngestJob, job_id)
+        if job is None or job.tenant_id != principal.tenant:
+            raise HTTPException(status_code=404, detail="job not found")
+        docs = s.query(Document).filter_by(job_id=job_id).all()
+        return {"job_id": job.id, "status": job.status, "doc_count": job.doc_count,
+                "post_summary": json.loads(job.post_summary) if job.post_summary else None,
+                "documents": [{"id": d.id, "filename": d.filename, "status": d.status,
+                               "attempts": d.attempts, "error": d.error} for d in docs]}
     finally:
         s.close()
 
