@@ -26,7 +26,6 @@ def _wb_db():
     s = ledger_db.SessionLocal()
     try:
         from backend.ledger.models import Account, Entry, Event, PostedLine
-        from backend.writeback.payload import idempotency_key as _ikey
         # Clean up test tenant data (FK-safe order)
         for t in _WB_TEST_TENANTS:
             ev_ids = [e.id for e in s.query(Event).filter_by(tenant_id=t).all()]
@@ -37,21 +36,6 @@ def _wb_db():
             s.query(PostedLine).filter_by(tenant_id=t).delete()
             s.query(Event).filter_by(tenant_id=t).delete()
             s.query(Account).filter_by(tenant_id=t).delete()
-        # Neutralize stale pending Deliveries from non-test-tenant events so that
-        # deliver_one() (called without tenant_id) doesn't pick them up instead of the
-        # event seeded during the current test.
-        s.query(Delivery).filter(
-            ~Delivery.tenant_id.in_(_WB_TEST_TENANTS),
-            Delivery.status == "pending",
-        ).update({"status": "delivered"}, synchronize_session=False)
-        # Pre-cover non-test-tenant events that have no Delivery so relay.enqueue_pending
-        # won't create fresh pending Deliveries for them.
-        for dest in ("file", "webhook"):
-            already = {r[0] for r in s.query(Delivery.event_id).filter_by(destination=dest).all()}
-            for ev in s.query(Event).filter(~Event.tenant_id.in_(_WB_TEST_TENANTS)).all():
-                if ev.id not in already:
-                    s.add(Delivery(tenant_id=ev.tenant_id, event_id=ev.id, destination=dest,
-                                   status="delivered", idempotency_key=_ikey(ev.tenant_id, ev.id, dest)))
         s.commit()
     finally:
         s.close()
@@ -60,8 +44,10 @@ def _wb_db():
 
 def _seed_one_event(tenant):
     s = ledger_db.SessionLocal()
-    service.post(s, tenant, "b1", [_li(claim_id="C1", paid=50.0)], [])
-    s.close()
+    try:
+        service.post(s, tenant, "b1", [_li(claim_id="C1", paid=50.0)], [])
+    finally:
+        s.close()
 
 
 def test_deliver_one_file_writes_and_marks_delivered(tmp_path, monkeypatch):
@@ -70,7 +56,7 @@ def test_deliver_one_file_writes_and_marks_delivered(tmp_path, monkeypatch):
     s = ledger_db.SessionLocal()
     relay.enqueue_pending(s, ["file"])
     s.close()
-    assert worker.deliver_one() is True
+    assert worker.deliver_one("wb_a") is True
     s = ledger_db.SessionLocal()
     try:
         d = s.query(Delivery).filter_by(tenant_id="wb_a", destination="file").one()
