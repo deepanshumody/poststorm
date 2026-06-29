@@ -45,6 +45,10 @@
 | `logging_config.py` | structured stdlib logging | config | stderr |
 | **`ledger/`** | **durable event-sourced double-entry ledger** | SQLAlchemy, schema | DB |
 | `ledger/review.py` | review queue + resolve actions (approve / pick / correct / dismiss) | ledger/service, models | DB |
+| `ingest/models.py` | `IngestJob`, `Document`, `Extraction` SQLAlchemy tables (share the ledger `Base`) | SQLAlchemy, ledger/models | DB |
+| `ingest/storage.py` | upload validation (type 415 / size 413) + file persistence in tenant-scoped dirs | config | filesystem |
+| `ingest/queue.py` | durable queue ops: `enqueue_job`, atomic `claim_next`, `record_extraction`, `mark_failed`, `maybe_finalize_job` | ingest/models, ledger/service, reconcile | DB |
+| `ingest/worker.py` | `process_one` (claim → extract → record), `recover_orphans`, `worker_loop` (asyncio task) | queue, extract, images, config | DB, network |
 
 **The core is pure, the shell is thin.** `reconcile.py` has no I/O and is the most heavily unit-tested module — the
 catastrophic-exception-prone money math is deterministic, not model-driven. This mirrors the "deterministic agents win at
@@ -121,6 +125,42 @@ and shared by both lanes; the in-memory job store is **bounded** (LRU-evicted) w
 **Deployability.** One-command `docker compose up`; self-contained image (regenerates + validates fixtures at build,
 non-root user, `/health` healthcheck); pinned dependencies; 12-factor env config; CI runs lint + the full test suite on
 every push.
+
+## Durable ingest pipeline
+
+`backend/ingest/` is the SQLite-backed intake pipeline that runs alongside the synchronous race demo without
+touching it.
+
+**SQLite-backed durable queue.** `ingest/queue.py` provides the queue primitives. `enqueue_job` creates one
+`IngestJob` + one `Document` per file, both `pending`. `claim_next` uses a predicate-guarded UPDATE
+(`WHERE status='pending'`) so only one worker can claim a given document regardless of concurrency.
+`maybe_finalize_job` is idempotent: it skips jobs already in a terminal state, and the ledger's `PostedLine`
+`line_key` unique constraint absorbs any duplicate post attempt.
+
+**Lifespan-managed workers.** `ingest/worker.py` exposes `worker_loop(stop_event)`, an asyncio task that calls
+`process_one` in a thread (via `asyncio.to_thread`) to avoid blocking the event loop. Workers are created in
+`main.py`'s `lifespan` context manager and cancelled at shutdown. A bare `TestClient(app)` (no `with`) does
+**not** enter the lifespan, so the test suite runs with zero ingest workers — the suite stays hermetic.
+
+**Partial-failure posts the successful subset.** When `maybe_finalize_job` runs and some documents failed,
+it collects `Extraction` rows only from documents with status `extracted`, reconciles and posts those lines,
+and marks the job `partially_failed`. Recoups whose counterpart payment lived in a failed document surface as
+`ReviewException` rows in the D review queue rather than being silently dropped.
+
+**Per-page multi-page extraction.** `process_one` iterates over pages returned by `images.load_page_images`,
+calls `extract.extract_page` on each data-URI, and concatenates the resulting `LineItem` lists before writing
+a single `Extraction` row.
+
+**Orphan recovery.** On lifespan startup, `recover_orphans` resets every `Document` in state `processing`
+back to `pending`. Documents in that state were being processed by a worker that crashed without completing;
+the reset lets workers re-try them up to `INGEST_MAX_ATTEMPTS` times.
+
+**Test coverage.** `tests/test_ingest_queue.py` verifies atomic claim (no double-claim under concurrency),
+happy-path extraction, retry-then-fail, partial-failure subset posting, `recover_orphans`, and idempotent
+finalize. `tests/test_ingest_worker.py` covers `process_one`. `tests/test_ingest_storage.py` covers upload
+validation and tenant isolation. `tests/test_ingest_api.py` covers the upload endpoint, demo-batch, and the
+retry endpoint. `tests/test_ingest_lifespan.py` verifies that workers drain the queue under a full lifespan
+context and confirms a bare `TestClient` starts none.
 
 ## Tests
 
