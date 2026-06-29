@@ -57,6 +57,21 @@ def test_unmatched_recoup_becomes_exception():
     assert res.exceptions == 1 and res.posted == 0
     assert s.query(ReviewException).count() == 1
     assert s.query(Entry).count() == 0
+    assert s.query(PostedLine).filter_by(event_id=None).count() == 1
+
+
+def test_same_patient_reversal_posts():
+    s = make_memory_session()
+    pay = _li(claim_id="C1", patient_ref="A", paid=100.0, check_number="CHK1")
+    rev = _li(claim_id="C1", patient_ref="A", paid=-100.0, check_number="CHK2",
+              event_type=EventType.reversal, recoup_flag=True)
+    rr = reconcile([pay, rev])
+    res = service.post(s, "demo", "b1", [pay, rev], rr.recoups)
+    assert res.posted == 2 and res.exceptions == 0
+    claim = s.query(Account).filter_by(type="claim", key="C1").one()
+    cash = s.query(Account).filter_by(type="provider_cash", key="main").one()
+    assert claim.balance_cents == 0   # +100 payment credit, -100 reversal debit
+    assert cash.balance_cents == 0    # -100 payment debit, +100 reversal credit
 
 
 def test_idempotent_repost_skips():
