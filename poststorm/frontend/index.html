@@ -269,6 +269,26 @@ const money=(n)=>Number(n).toLocaleString(undefined,{minimumFractionDigits:2,max
 const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const PACE=170;
 
+let TOKEN = null;
+async function ensureToken(){
+  if(TOKEN) return TOKEN;
+  const r = await fetch("/auth/demo-token");
+  if(!r.ok) throw new Error("auth bootstrap failed");
+  TOKEN = (await r.json()).access_token;
+  return TOKEN;
+}
+async function authFetch(url, opts){
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {}, {"Authorization": "Bearer " + await ensureToken()});
+  let r = await fetch(url, Object.assign({}, opts, {headers}));
+  if(r.status === 401){            // token expired → refresh once and retry
+    TOKEN = null;
+    headers["Authorization"] = "Bearer " + await ensureToken();
+    r = await fetch(url, Object.assign({}, opts, {headers}));
+  }
+  return r;
+}
+
 let docsById={}, claimToDoc={}, pending=[], total=0;
 let cerSeen=0, gemSeen=0, posted=0, amt=0, recoupsLive=0;
 let sumCt=0, sumCt_t=0, gemLat=[], ledgerData=null, climaxed=false;
@@ -402,14 +422,14 @@ function maybeClimax(){
 
 $("run").onclick=async()=>{
   $("run").disabled=true; reset();
-  const r=await fetch("/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({count:24})});
+  const r=await authFetch("/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({count:24})});
   const data=await r.json(); buildWall(data.docs);
   t0=performance.now();
   cerTimerIv=setInterval(()=>{ if(!cerFrozen)$("cerTimer").textContent=((performance.now()-t0)/1000).toFixed(2)+"s"; },33);
   gemTimerIv=setInterval(()=>{ $("gemTimer").textContent=((performance.now()-t0)/1000).toFixed(2)+"s"; },33);
   pumpIv=setInterval(()=>{ if(pending.length) featureDoc(pending.shift()); maybeClimax(); },PACE);
 
-  const es=new EventSource(`/jobs/${data.job_id}/stream`);
+  const es=new EventSource(`/jobs/${data.job_id}/stream?ticket=${encodeURIComponent(data.stream_ticket)}`);
   es.onmessage=(m)=>{
     const ev=JSON.parse(m.data);
     if(ev.type==="doc"){
@@ -444,7 +464,7 @@ function actionBtn(label, onClick){
 
 async function loadReview(){
   try{
-    const r=await fetch("/review/queue"); const items=(await r.json()).items;
+    const r=await authFetch("/review/queue"); const items=(await r.json()).items;
     const host=$("reviewList"); host.innerHTML="";
     $("reviewCount").textContent=items.length+" open";
     if(!items.length){ host.innerHTML='<div class="empty">No open exceptions.</div>'; return; }
@@ -467,21 +487,21 @@ async function loadReview(){
 }
 
 async function resolveEx(id, action, chosen){
-  await fetch(`/review/${id}/resolve`,{method:"POST",headers:{"content-type":"application/json"},
+  await authFetch(`/review/${id}/resolve`,{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({action, chosen_claim: chosen||null})});
   loadReview(); refreshLedger();
 }
 
 async function correctEx(id){
   const v=prompt("Corrected paid amount ($):"); if(v===null) return;
-  await fetch(`/review/${id}/resolve`,{method:"POST",headers:{"content-type":"application/json"},
+  await authFetch(`/review/${id}/resolve`,{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({action:"correct", corrected:{paid: Number(v)}})});
   loadReview(); refreshLedger();
 }
 
 async function refreshLedger(){
   try{
-    const b=await (await fetch("/ledger/balances")).json();
+    const b=await (await authFetch("/ledger/balances")).json();
     $("sorEvents").textContent=b.event_count;
     $("sorDump").textContent="$"+money(b.dump_exposure_cents/100);
   }catch(e){}
