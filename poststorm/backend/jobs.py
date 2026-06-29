@@ -1,8 +1,11 @@
 import asyncio
 import time
+import uuid
 from dataclasses import asdict
 
 from backend import baseline, extract, images, reconcile
+from backend.ledger import db as ledger_db
+from backend.ledger import service as ledger_service
 from backend.logging_config import get_logger
 
 log = get_logger("poststorm.jobs")
@@ -76,11 +79,24 @@ async def run_job(paths: list[str]):
                 if cer_left == 0:
                     cer_ms = (time.perf_counter() - t0) * 1000
                     rr = reconcile.reconcile(all_items)
+                    sor = None
+                    try:
+                        sess = ledger_db.SessionLocal()
+                        try:
+                            pr = await asyncio.to_thread(
+                                ledger_service.post, sess, "demo", uuid.uuid4().hex[:8], all_items, rr.recoups)
+                            sor = {"posted": pr.posted, "skipped": pr.skipped, "exceptions": pr.exceptions,
+                                   "events": pr.events, "dump_exposure_cents": pr.dump_exposure_cents}
+                        finally:
+                            sess.close()
+                    except Exception:
+                        log.exception("ledger post failed")
                     yield {"type": "ledger",
                            "ledger": [asdict(e) for e in rr.ledger],
                            "recoups": [asdict(x) for x in rr.recoups],
                            "totals": rr.totals,
-                           "needs_review": [li.model_dump(mode="json") for li in rr.needs_review]}
+                           "needs_review": [li.model_dump(mode="json") for li in rr.needs_review],
+                           "system_of_record": sor}
                     yield {"type": "cer_done", "elapsed_ms": round(cer_ms, 1), "count": total}
                     # Stop the slower Gemini lane and report progress.
                     for g in pending:
