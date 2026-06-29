@@ -96,6 +96,36 @@ Two read endpoints expose its state:
 Storage defaults to **SQLite** (`data/ledger.db`; persisted in Docker via the `ledger-data` named volume).  
 Override with **Postgres** by setting `DATABASE_URL=postgresql+psycopg2://...` in your `.env`.
 
+### Human-in-the-loop review
+
+Payments the model marks `confidence="low"` and ambiguous recoupments (a takeback whose amount matches more than
+one payment, so the deterministic engine cannot pick) are routed to a **review queue** instead of being auto-posted.
+
+**Two exception kinds:**
+- `low_confidence` — extracted line flagged by the model; held until a reviewer confirms or corrects it.
+- `ambiguous` — recoup that matches multiple same-amount payments; reviewer picks which one it offsets.
+
+**Four resolve actions** (`POST /review/{id}/resolve`):
+- `approve` — post the line as-is.
+- `pick` — choose which candidate payment the ambiguous recoup offsets (requires `chosen_claim`).
+- `correct` — edit a field (e.g. paid amount) and post the corrected line; the original vs. corrected pair is
+  stored as a `Feedback` row — the seam for future improvement (captured, not yet consumed for retraining).
+- `dismiss` — drop the line; nothing is posted.
+
+Resolved lines are posted via `service.post_reviewed_line`, which writes an append-only ledger event tagged with the
+`reviewer` string. The `ReviewException` row is a **mutable work-item** (status `open → resolved / dismissed`);
+the ledger events it creates are immutable. Resolving an already-resolved exception is an idempotent no-op.
+
+**Endpoints:**
+
+| Endpoint | Returns |
+|---|---|
+| `GET /review/queue?status=open` | Open (or filtered) exceptions with line, kind, and candidate claim ids. |
+| `POST /review/{id}/resolve` | Resolve one exception; body `{action, corrected?, chosen_claim?}`; invalid input → 400. |
+| `GET /review/feedback` | All correction pairs (original vs. corrected) recorded so far. |
+
+> No auth/RBAC yet — reviewer identity is the string passed in the request body (default `"demo-reviewer"`).
+
 ## How it works
 
 See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the data flow, module boundaries, the recoupment-detection logic, and the
