@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from backend.config import get_settings
 from backend.jobs import run_job
 from backend.ledger import db as ledger_db
+from backend.ledger import review as ledger_review
 from backend.ledger import service as ledger_service
 from backend.logging_config import get_logger
 
@@ -42,6 +43,19 @@ except Exception:
     log.warning("ledger init_db failed; ledger persistence disabled this run", exc_info=True)
 
 
+JOBS: dict[str, list[str]] = {}
+
+
+class JobRequest(BaseModel):
+    count: int = Field(default=24, ge=1, le=48)
+
+
+class ResolveRequest(BaseModel):
+    action: str
+    corrected: dict | None = None
+    chosen_claim: str | None = None
+
+
 @app.get("/ledger/balances")
 def ledger_balances():
     s = ledger_db.SessionLocal()
@@ -60,11 +74,33 @@ def ledger_audit(limit: int = 50):
         s.close()
 
 
-JOBS: dict[str, list[str]] = {}
+@app.get("/review/queue")
+def review_queue(status: str = "open"):
+    s = ledger_db.SessionLocal()
+    try:
+        return {"items": ledger_review.review_queue(s, "demo", status)}
+    finally:
+        s.close()
 
 
-class JobRequest(BaseModel):
-    count: int = Field(default=24, ge=1, le=48)
+@app.post("/review/{exc_id}/resolve")
+def review_resolve(exc_id: int, req: ResolveRequest):
+    s = ledger_db.SessionLocal()
+    try:
+        return ledger_review.resolve(s, "demo", exc_id, req.action, req.corrected, req.chosen_claim)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    finally:
+        s.close()
+
+
+@app.get("/review/feedback")
+def review_feedback():
+    s = ledger_db.SessionLocal()
+    try:
+        return {"feedback": ledger_review.feedback_list(s, "demo")}
+    finally:
+        s.close()
 
 
 @app.middleware("http")

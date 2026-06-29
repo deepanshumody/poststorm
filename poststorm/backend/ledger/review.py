@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.ledger import service
 from backend.ledger.models import Feedback, PostedLine, ReviewException
@@ -8,7 +8,7 @@ from backend.schema import LineItem
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def review_queue(session, tenant_id, status="open"):

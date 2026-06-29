@@ -150,6 +150,7 @@ def test_post_reviewed_recoup_tags_reviewer_and_balances():
                                      chosen_claim="C1", reviewer="demo-reviewer")
     assert eid is not None
     import json
+
     from backend.ledger.models import Account, Entry, Event
     ev = s.get(Event, eid)
     meta = json.loads(ev.meta)
