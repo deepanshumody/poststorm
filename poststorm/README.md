@@ -273,6 +273,71 @@ The following are intentionally out of scope for this demo build:
 - **KMS-backed key storage** — the current `sha256(salt + key)` hash is sufficient for demo scale; production deployments with stricter requirements would store key material in AWS KMS / GCP Cloud KMS.
 - **Redis-backed rate limiting** — the in-memory token bucket is single-node; swap `ratelimit.RateLimiter` for a Redis-backed implementation to enforce limits across replicas.
 
+## Write-back / delivery
+
+Once a batch is posted to the ledger, an **event-sourced relay** (`backend/writeback/`) projects a durable `Delivery`
+outbox from the append-only ledger event log — one row per event per configured destination. Lifespan-managed asyncio
+workers claim and push each delivery to the destination, completing the lockbox-to-ledger-to-downstream loop.
+
+### Destinations
+
+**File export** — writes two files to `<EXPORT_DIR>/<tenant>/<idempotency_key>`:
+
+- `.json` — the canonical posting: all ledger entry fields, provenance (model, confidence, `source_line_key`), and the
+  idempotency key.
+- `.835.txt` — a **representative** ERA-style remittance (BPR / TRN / N1 / CLP / SVC / PLB segments). Clearly labeled
+  in-file as *not* standards-valid X12; the full 835 EDI generator is a documented extension point.
+
+**HMAC-signed webhook** — POSTs the canonical JSON to `WRITEBACK_WEBHOOK_URL` with:
+
+- `X-Signature: sha256=<hmac-sha256>` — signed with `WRITEBACK_WEBHOOK_SECRET`.
+- `Idempotency-Key: <idempotency_key>` — for receiver-side dedup.
+- HTTP 409 is treated as success (receiver already saw the key); 5xx / timeout is retryable; other 4xx is permanent.
+
+### Delivery semantics
+
+- **At-least-once** with a **stable idempotency key** (`sha256(tenant|event_id|destination)`) — the deterministic file
+  path on disk and the `Idempotency-Key` header on the wire make duplicate deliveries safe at the receiver.
+- **Retry / backoff** — failed-but-retryable deliveries return to `pending`; after `WRITEBACK_MAX_ATTEMPTS` attempts the
+  row moves to `dead` (dead-letter state).
+- **Restart-survivable** — `recover_orphans` resets any `delivering` rows back to `pending` on startup, so in-flight
+  deliveries from a previous crash are retried automatically.
+- **No double-enqueue** — the `(tenant_id, event_id, destination)` unique constraint makes relay runs idempotent.
+
+### Endpoints
+
+| Endpoint | Role | Description |
+|---|---|---|
+| `GET /writeback/deliveries` | viewer | Outbox viewer — all delivery rows (optional `?status=` filter). |
+| `POST /writeback/deliveries/{id}/retry` | reviewer | Reset a `failed` or `dead` delivery to `pending` (attempts reset to 0). |
+| `POST /writeback/mock-sink` | — | Dev-only loopback: verifies `X-Signature`, deduplicates on `Idempotency-Key`, stores the payload. Gated by `DEMO_MODE=true`. |
+| `GET /writeback/mock-sink` | viewer | List payloads received by the mock sink. |
+
+The mock sink lets the demo show end-to-end signed delivery without a real downstream system.
+
+### Configuration knobs
+
+| Var | Default | Purpose |
+|---|---|---|
+| `WRITEBACK_DESTINATIONS` | `file` | Comma-separated active destinations (`file`, `webhook`). |
+| `WRITEBACK_WEBHOOK_URL` | _(empty)_ | Target URL for the webhook destination; empty skips webhook delivery. |
+| `WRITEBACK_WEBHOOK_SECRET` | `dev-writeback-secret` | HMAC-SHA256 signing secret. Set a real secret in production. |
+| `WRITEBACK_MAX_ATTEMPTS` | `5` | Attempt ceiling; exhausted → `dead`. |
+| `WRITEBACK_WORKERS` | `2` | Lifespan delivery worker tasks. |
+| `WRITEBACK_IDLE_SLEEP` | `0.25` | Worker poll interval (seconds) when the queue is empty. |
+| `EXPORT_DIR` | `./data/exports` | Root directory for file exports; tenant-isolated subdirectories created automatically. |
+
+### Extension points (not built)
+
+The following are intentionally out of scope for this demo build:
+
+- **Standards-valid X12 835 EDI** — `to_835` in `payload.py` produces a representative, human-readable ERA for demo
+  purposes; a production 835 generator would use a certified X12 library and emit proper loop/segment-count envelopes.
+- **Real downstream connectors** — Epic, athenahealth, SFTP, and clearinghouse APIs are the natural swap-points for
+  the adapter functions; `deliver_file` / `deliver_webhook` is the extension seam.
+- **External broker** — the in-process `worker_loop` / `relay_loop` are the natural swap-points for a distributed task
+  queue (Redis / Celery) when multi-node scale is needed.
+
 ---
 
 ## How it works

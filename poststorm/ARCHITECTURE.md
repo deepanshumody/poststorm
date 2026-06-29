@@ -49,6 +49,11 @@
 | `ingest/storage.py` | upload validation (type 415 / size 413) + file persistence in tenant-scoped dirs | config | filesystem |
 | `ingest/queue.py` | durable queue ops: `enqueue_job`, atomic `claim_next`, `record_extraction`, `mark_failed`, `maybe_finalize_job` | ingest/models, ledger/service, reconcile | DB |
 | `ingest/worker.py` | `process_one` (claim → extract → record), `recover_orphans`, `worker_loop` (asyncio task) | queue, extract, images, config | DB, network |
+| `writeback/models.py` | `Delivery` SQLAlchemy outbox table (shares the ledger `Base`); unique constraint `(tenant_id, event_id, destination)` | SQLAlchemy, ledger/models | DB |
+| `writeback/payload.py` | `idempotency_key`, `build_posting` (canonical posting dict), `to_835` (representative ERA — not standards-valid X12) | ledger/models | none |
+| `writeback/relay.py` | `enqueue_pending` — projects `Delivery` rows from the event log for each destination (idempotent) | writeback/models, writeback/payload, ledger/models | DB |
+| `writeback/adapters.py` | `DeliveryResult`, `deliver_file` (JSON + `.835.txt`), `deliver_webhook` (HMAC-signed POST) | writeback/payload, config | filesystem, network |
+| `writeback/worker.py` | `claim_next`, `deliver_one`, `recover_orphans`, `worker_loop`, `relay_loop` (asyncio tasks) | writeback/models, payload, relay, adapters, config | DB, filesystem, network |
 
 **The core is pure, the shell is thin.** `reconcile.py` has no I/O and is the most heavily unit-tested module — the
 catastrophic-exception-prone money math is deterministic, not model-driven. This mirrors the "deterministic agents win at
@@ -161,6 +166,30 @@ finalize. `tests/test_ingest_worker.py` covers `process_one`. `tests/test_ingest
 validation and tenant isolation. `tests/test_ingest_api.py` covers the upload endpoint, demo-batch, and the
 retry endpoint. `tests/test_ingest_lifespan.py` verifies that workers drain the queue under a full lifespan
 context and confirms a bare `TestClient` starts none.
+
+## Write-back / delivery
+
+`backend/writeback/` is the event-sourced delivery layer that observes the append-only ledger event log and forwards
+postings to configured downstream destinations.
+
+**Outbox projection, not direct coupling.** The relay (`relay.py`) scans `Event` rows for any that have no `Delivery`
+row yet for a given destination, and projects one `Delivery` per event per destination into the outbox table. Layers
+C (reconcile), D (review), F (ingest), and A+B (ledger + auth) are entirely untouched — write-back is a read-only
+observer of the event log.
+
+**At-least-once delivery with a stable idempotency key.** The key — `sha256(tenant|event_id|destination)` — is
+deterministic and stable: the file path on disk is deterministic (a re-delivered file overwrites an identical one),
+the `Idempotency-Key` webhook header lets the receiver deduplicate, and the outbox unique constraint
+`(tenant_id, event_id, destination)` prevents double-enqueue regardless of relay concurrency.
+
+**Same durable-worker patterns as the ingest layer.** Workers are lifespan-managed asyncio tasks (relay_loop +
+worker_loop). `claim_next` uses a predicate-guarded UPDATE (`WHERE status='pending'`) so no two workers claim the
+same delivery. `recover_orphans` resets `delivering → pending` on startup for crash recovery. A bare
+`TestClient(app)` (no `with`) skips the lifespan entirely, keeping the test suite hermetic.
+
+**Representative 835, not standards-valid X12.** `to_835` produces a human-readable ERA-style remittance
+(BPR / TRN / N1 / CLP / SVC / PLB segments) for demo visibility. The file is labeled in-content as not standards-valid;
+a full X12 835 EDI generator (certified library, proper loop/segment-count envelopes) is a documented extension point.
 
 ## Tests
 
