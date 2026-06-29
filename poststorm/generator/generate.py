@@ -425,9 +425,9 @@ def _validate(case):
     assert abs((paid - case["recoup"]["amount"]) - case["check_amt"]) < 0.01, f"{case['doc_id']}: check doesn't foot"
 
 
-def main(n=24, recoup_cases=3, seed=7):
+def main(n=24, recoup_cases=3, seed=7, ambiguous_cases=1):
     (OUT / "eobs").mkdir(parents=True, exist_ok=True)
-    cases = build_cases(n, recoup_cases, seed)
+    cases = build_cases(n, recoup_cases, seed, ambiguous_cases)
     truth = []
     for i, c in enumerate(cases):
         _validate(c)

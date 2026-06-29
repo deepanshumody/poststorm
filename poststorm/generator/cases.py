@@ -216,6 +216,7 @@ def build_cases(n: int, recoup_cases: int, seed: int, ambiguous_cases: int = 1) 
         if is_ambiguous:
             # Plant ambiguous recoup: same amount as claims[0]["paid"] but for a third patient,
             # creating two cross-patient candidates so reconcile emits needs_review.
+            # ambiguous doc draws extra rng (names/ids) — intentionally advances the sequence for later docs
             X = claims[0]["paid"]
             pb = f"{rng.choice(LAST)}, {rng.choice(FIRST)}"
             while pb in seen:
