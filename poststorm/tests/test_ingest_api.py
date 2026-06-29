@@ -8,6 +8,7 @@ from backend.config import get_settings
 from backend.ingest import queue as iq
 from backend.ingest.models import Document, IngestJob
 from backend.ledger import db as ledger_db
+from backend.ledger.models import _now
 from tests._auth import authed_client
 
 _INGEST_API_TEST_TENANTS = ("rt_a", "rt_b", "st_a", "db_a")
@@ -96,6 +97,39 @@ def test_retry_resets_failed_document():
     # cross-tenant retry → 404
     other = authed_client(role="reviewer", tenant="rt_b")
     assert other.post("/ingest/documents/d_rt/retry").status_code == 404
+
+
+def test_retry_reopens_finalized_job():
+    # Seed a job in "finalized" status with one "failed" document under tenant rt_a.
+    s = ledger_db.SessionLocal()
+    iq.enqueue_job(s, "rt_a", [iq.DocSpec("d_rt2", "g.png", "image/png", "/tmp/g.png")])
+    job_row = s.query(IngestJob).filter(IngestJob.tenant_id == "rt_a").one()
+    job_id = job_row.id
+    job_row.status = "finalized"
+    job_row.finalized_at = _now()
+    doc = s.get(Document, "d_rt2")
+    doc.status = "failed"
+    doc.error = "extraction_failed"
+    doc.attempts = 3
+    s.commit()
+    s.close()
+
+    rc = authed_client(role="reviewer", tenant="rt_a")
+    r = rc.post("/ingest/documents/d_rt2/retry")
+    assert r.status_code == 200 and r.json()["status"] == "pending"
+
+    # Verify the job was re-opened: status back to "processing", finalized_at cleared.
+    s2 = ledger_db.SessionLocal()
+    try:
+        refreshed_job = s2.get(IngestJob, job_id)
+        assert refreshed_job.status == "processing"
+        assert refreshed_job.finalized_at is None
+    finally:
+        s2.close()
+
+    # cross-tenant retry → 404
+    other = authed_client(role="reviewer", tenant="rt_b")
+    assert other.post("/ingest/documents/d_rt2/retry").status_code == 404
 
 
 def test_stream_emits_finalized_for_terminal_job():
