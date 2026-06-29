@@ -62,9 +62,40 @@ def _is_recoup(line: LineItem) -> bool:
     return line.recoup_flag or line.event_type in (EventType.recoup, EventType.reversal) or line.paid < 0
 
 
-# Temporary stub — full implementation in Task 4.
+def _post_recoup(session, tenant_id, batch_id, line, r, lk):
+    cents = abs(to_cents(line.paid))
+    ev = _event(session, tenant_id, batch_id, "recoup", line, lk,
+                {"payer": line.payer, "offset_original_claim": r.original_claim_id, "patient": line.patient_ref})
+    _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "debit", cents, "prior payment reversed")
+    _entry(session, ev, _account(session, tenant_id, "dump_account", line.check_number), "credit", cents, "parked offset")
+
+
+def _post_reversal(session, tenant_id, batch_id, line, lk):
+    cents = abs(to_cents(line.paid))
+    ev = _event(session, tenant_id, batch_id, "reversal", line, lk,
+                {"payer": line.payer, "patient": line.patient_ref})
+    _entry(session, ev, _account(session, tenant_id, "claim", line.claim_id), "debit", cents, "reversal")
+    _entry(session, ev, _account(session, tenant_id, "provider_cash", "main"), "credit", cents, "cash reduced")
+
+
+def _exception(session, tenant_id, lk, kind, line):
+    session.add(ReviewException(tenant_id=tenant_id, line_key=lk, kind=kind,
+                payload=json.dumps({"claim": line.claim_id, "patient": line.patient_ref, "paid": line.paid})))
+    session.add(PostedLine(tenant_id=tenant_id, line_key=lk, event_id=None))
+
+
 def _route_recoup(session, tenant_id, batch_id, line, r, lk, res):
-    res.skipped += 1
+    if r and r.cross_patient:
+        _post_recoup(session, tenant_id, batch_id, line, r, lk)
+        res.events += 1
+        res.posted += 1
+    elif r and not r.cross_patient:
+        _post_reversal(session, tenant_id, batch_id, line, lk)
+        res.events += 1
+        res.posted += 1
+    else:
+        _exception(session, tenant_id, lk, "ambiguous", line)
+        res.exceptions += 1
 
 
 def post(session, tenant_id, batch_id, lines, recoups) -> PostingResult:

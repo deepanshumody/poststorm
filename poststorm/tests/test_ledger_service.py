@@ -1,6 +1,6 @@
 from backend.ledger import service
 from backend.ledger.db import make_memory_session
-from backend.ledger.models import Account, Entry, Event, PostedLine
+from backend.ledger.models import Account, Entry, Event, PostedLine, ReviewException
 from backend.reconcile import reconcile
 from backend.schema import Confidence, EventType, LineItem
 
@@ -27,6 +27,36 @@ def test_payment_posts_balanced_double_entry():
     cash = s.query(Account).filter_by(type="provider_cash", key="main").one()
     assert claim.balance_cents == 8000     # credit
     assert cash.balance_cents == -8000     # debit
+
+
+def test_cross_patient_recoup_posts_to_dump_account():
+    s = make_memory_session()
+    pay = _li(claim_id="C1", patient_ref="A", paid=842.50, check_number="CHK7")
+    take = _li(claim_id="R9", patient_ref="B", paid=-842.50, check_number="CHK7",
+               event_type=EventType.recoup, recoup_flag=True)
+    rr = reconcile([pay, take])
+    res = service.post(s, "demo", "b1", [pay, take], rr.recoups)
+    assert res.posted == 2 and res.exceptions == 0
+    dump = s.query(Account).filter_by(type="dump_account", key="CHK7").one()
+    rclaim = s.query(Account).filter_by(type="claim", key="R9").one()
+    assert dump.balance_cents == 84250        # credit (parked offset)
+    assert rclaim.balance_cents == -84250     # debit (prior payment reversed)
+    assert res.dump_exposure_cents == 84250
+    # every event balances
+    for ev in s.query(Event).all():
+        es = s.query(Entry).filter_by(event_id=ev.id).all()
+        assert sum(e.amount_cents for e in es if e.direction == "debit") == \
+               sum(e.amount_cents for e in es if e.direction == "credit")
+
+
+def test_unmatched_recoup_becomes_exception():
+    s = make_memory_session()
+    take = _li(claim_id="R9", patient_ref="B", paid=-50.0, check_number="CHKX",
+               event_type=EventType.recoup, recoup_flag=True)
+    res = service.post(s, "demo", "b1", [take], [])  # no matching payment -> no Recoup
+    assert res.exceptions == 1 and res.posted == 0
+    assert s.query(ReviewException).count() == 1
+    assert s.query(Entry).count() == 0
 
 
 def test_idempotent_repost_skips():
