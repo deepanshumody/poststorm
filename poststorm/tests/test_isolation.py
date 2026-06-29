@@ -2,7 +2,7 @@ import pytest
 
 from backend.ledger import db as ledger_db
 from backend.ledger import service
-from backend.ledger.models import PostedLine, ReviewException
+from backend.ledger.models import Feedback, PostedLine, ReviewException
 from backend.reconcile import reconcile
 from backend.schema import Confidence, EventType, LineItem
 from tests._auth import authed_client
@@ -22,7 +22,7 @@ def clean_iso_tenants():
     """Remove rows for the two isolation tenants before each test."""
     s = ledger_db.SessionLocal()
     try:
-        for model in (ReviewException, PostedLine):
+        for model in (ReviewException, PostedLine, Feedback):
             s.query(model).filter(model.tenant_id.in_(("iso_a", "iso_b"))).delete(
                 synchronize_session=False)
         s.commit()
@@ -33,12 +33,14 @@ def clean_iso_tenants():
 
 def _seed_ambiguous(tenant: str):
     s = ledger_db.SessionLocal()
-    a = _li(claim_id="IA1", patient_ref="P-A", paid=50.0, check_number="ISO")
-    b = _li(claim_id="IA2", patient_ref="P-B", paid=50.0, check_number="ISO")
-    take = _li(claim_id="IA3", patient_ref="P-C", paid=-50.0, check_number="ISO",
-               event_type=EventType.recoup, recoup_flag=True)
-    service.post(s, tenant, "iso", [a, b, take], reconcile([a, b, take]).recoups)
-    s.close()
+    try:
+        a = _li(claim_id="IA1", patient_ref="P-A", paid=50.0, check_number="ISO")
+        b = _li(claim_id="IA2", patient_ref="P-B", paid=50.0, check_number="ISO")
+        take = _li(claim_id="IA3", patient_ref="P-C", paid=-50.0, check_number="ISO",
+                   event_type=EventType.recoup, recoup_flag=True)
+        service.post(s, tenant, "iso", [a, b, take], reconcile([a, b, take]).recoups)
+    finally:
+        s.close()
 
 
 def test_no_token_is_401():
@@ -82,9 +84,11 @@ def test_reviewer_identity_lands_in_resolution():
 
 def test_invalid_corrected_still_400_not_404():
     s = ledger_db.SessionLocal()
-    low = _li(claim_id="ILC", paid=10.0, confidence=Confidence.low, check_number="ISO")
-    service.post(s, "iso_a", "iso_lc", [low], [])
-    s.close()
+    try:
+        low = _li(claim_id="ILC", paid=10.0, confidence=Confidence.low, check_number="ISO")
+        service.post(s, "iso_a", "iso_lc", [low], [])
+    finally:
+        s.close()
     a = authed_client(role="reviewer", tenant="iso_a")
     item = a.get("/review/queue").json()["items"][0]
     r = a.post(f"/review/{item['id']}/resolve", json={"action": "correct", "corrected": {"paid": "abc"}})

@@ -42,3 +42,21 @@ def test_seed_is_idempotent_and_demo_key_works():
     assert p is not None and p.tenant == "demo" and p.role == "reviewer"
     from backend.ledger.models import ApiKey
     assert s.query(ApiKey).filter_by(tenant_id="demo", active=True).count() == 1
+
+
+def test_admin_bootstrap_key_seeds_admin_role():
+    s = make_memory_session()
+    settings = Settings(admin_bootstrap_key="pk_admin_bootstrap_test")
+    auth.seed_tenants(s, settings)
+    auth.seed_tenants(s, settings)  # idempotent
+    p = auth.verify_api_key(s, "pk_admin_bootstrap_test")
+    assert p is not None and p.tenant == "admin" and p.role == "admin"
+    from backend.ledger.models import ApiKey
+    assert s.query(ApiKey).filter_by(tenant_id="admin", active=True).count() == 1
+
+
+def test_no_admin_key_when_bootstrap_unset():
+    s = make_memory_session()
+    auth.seed_tenants(s, Settings())  # admin_bootstrap_key defaults to ""
+    from backend.ledger.models import ApiKey
+    assert s.query(ApiKey).filter_by(tenant_id="admin").count() == 0

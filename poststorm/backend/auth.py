@@ -110,6 +110,15 @@ def seed_tenants(session, settings) -> None:
                 issue_key(session, "demo", role, raw_key=raw)
         session.commit()
 
+    # When an admin bootstrap key is configured (prod), seed a single admin-role key
+    # under a dedicated "admin" tenant so the /admin/* onboarding tier is reachable.
+    # Idempotent: only seeded once. Empty (the dev/demo default) → no admin key exists.
+    if settings.admin_bootstrap_key:
+        create_tenant(session, "admin")
+        if verify_api_key(session, settings.admin_bootstrap_key) is None:
+            issue_key(session, "admin", "admin", raw_key=settings.admin_bootstrap_key)
+        session.commit()
+
 
 def require_principal(request: Request, authorization: str | None = Header(default=None)) -> Principal:
     cached = getattr(request.state, "principal", None)

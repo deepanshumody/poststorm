@@ -47,3 +47,20 @@ def test_http_429_with_retry_after(monkeypatch):
         assert "retry-after" in {k.lower() for k in r.headers}
     finally:
         ratelimit.set_limiter(None)  # reset to default for other tests
+
+
+def test_auth_token_throttled_per_source():
+    from fastapi.testclient import TestClient
+
+    from backend import ratelimit
+    from backend.main import app
+    ratelimit.set_auth_limiter(RateLimiter(capacity=1, refill_per_sec=0.0, now=lambda: 0.0))
+    try:
+        c = TestClient(app)
+        r1 = c.post("/auth/token", json={"api_key": "bad"})   # consumes the one token, then 401 (bad key)
+        assert r1.status_code == 401
+        r2 = c.post("/auth/token", json={"api_key": "bad"})   # bucket empty → throttled before key check
+        assert r2.status_code == 429
+        assert "retry-after" in {k.lower() for k in r2.headers}
+    finally:
+        ratelimit.set_auth_limiter(None)  # restore default for other tests

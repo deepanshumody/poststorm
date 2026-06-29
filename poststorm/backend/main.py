@@ -4,7 +4,7 @@ import secrets
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -116,7 +116,7 @@ class KeyRequest(BaseModel):
 
 
 @app.post("/auth/token")
-def auth_token(req: TokenRequest):
+def auth_token(req: TokenRequest, response: Response, _a: None = Depends(ratelimit.enforce_auth)):
     s = ledger_db.SessionLocal()
     try:
         principal = auth.verify_api_key(s, req.api_key)
@@ -126,15 +126,17 @@ def auth_token(req: TokenRequest):
         raise HTTPException(status_code=401, detail="invalid api key",
                             headers={"WWW-Authenticate": "Bearer"})
     token = auth.issue_jwt(principal, settings.jwt_secret, settings.jwt_ttl_seconds)
+    response.headers["Cache-Control"] = "no-store"
     return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
 
 
 @app.get("/auth/demo-token")
-def auth_demo_token():
+def auth_demo_token(response: Response):
     if not settings.demo_mode:
         raise HTTPException(status_code=404, detail="not found")
     principal = auth.Principal(tenant="demo", role="reviewer", sub="demo-key")
     token = auth.issue_jwt(principal, settings.jwt_secret, settings.jwt_ttl_seconds)
+    response.headers["Cache-Control"] = "no-store"
     return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
 
 

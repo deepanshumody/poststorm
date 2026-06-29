@@ -1,7 +1,7 @@
 import time
 from collections.abc import Callable
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from backend import auth
 from backend.config import get_settings
@@ -52,3 +52,29 @@ def enforce(principal: auth.Principal = Depends(auth.require_principal)) -> auth
         raise HTTPException(status_code=429, detail="rate limit exceeded",
                             headers={"Retry-After": str(int(retry) + 1)})
     return principal
+
+
+_auth_limiter: RateLimiter | None = None
+
+
+def set_auth_limiter(rl: RateLimiter | None) -> None:
+    """Test seam for the per-source auth-attempt limiter."""
+    global _auth_limiter
+    _auth_limiter = rl
+
+
+def _get_auth_limiter() -> RateLimiter:
+    global _auth_limiter
+    if _auth_limiter is None:
+        s = get_settings()
+        _auth_limiter = RateLimiter(s.rate_burst, s.rate_rps, time.monotonic)
+    return _auth_limiter
+
+
+def enforce_auth(request: Request) -> None:
+    """Throttle unauthenticated token requests per source IP to blunt brute force."""
+    key = request.client.host if request.client else "unknown"
+    allowed, retry = _get_auth_limiter().check(f"auth:{key}")
+    if not allowed:
+        raise HTTPException(status_code=429, detail="too many auth attempts",
+                            headers={"Retry-After": str(int(retry) + 1)})
