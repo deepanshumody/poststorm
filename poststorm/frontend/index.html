@@ -435,6 +435,13 @@ $("run").onclick=async()=>{
   };
 };
 
+function actionBtn(label, onClick){
+  const b=document.createElement("button");
+  b.textContent=label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
 async function loadReview(){
   try{
     const r=await fetch("/review/queue"); const items=(await r.json()).items;
@@ -443,17 +450,17 @@ async function loadReview(){
     if(!items.length){ host.innerHTML='<div class="empty">No open exceptions.</div>'; return; }
     for(const it of items){
       const li=it.line||{};
-      const cands=(it.candidates||[]).map(c=>
-        `<button onclick="resolveEx(${it.id},'pick','${esc(c)}')">offsets ${esc(c)}</button>`).join(" ");
       const row=document.createElement("div"); row.className="rev";
       row.innerHTML=
         `<div><b class="${it.kind==='ambiguous'?'rk-a':'rk-l'}">${esc(it.kind)}</b> `+
         `${esc(li.claim_id)} · ${esc(li.patient_ref)} · $${money(li.paid)} `+
-        `<span class="dim">(${esc(it.reason)})</span></div>`+
-        `<div class="revacts">${cands}`+
-        `<button onclick="resolveEx(${it.id},'approve')">approve</button>`+
-        `<button onclick="correctEx(${it.id})">correct $</button>`+
-        `<button onclick="resolveEx(${it.id},'dismiss')">dismiss</button></div>`;
+        `<span class="dim">(${esc(it.reason)})</span></div>`;
+      const acts=document.createElement("div"); acts.className="revacts";
+      for(const c of (it.candidates||[])){ acts.appendChild(actionBtn(`offsets ${c}`, ()=>resolveEx(it.id,'pick',c))); }
+      acts.appendChild(actionBtn("approve", ()=>resolveEx(it.id,'approve')));
+      acts.appendChild(actionBtn("correct $", ()=>correctEx(it.id)));
+      acts.appendChild(actionBtn("dismiss", ()=>resolveEx(it.id,'dismiss')));
+      row.appendChild(acts);
       host.appendChild(row);
     }
   }catch(e){ /* silently degrade if backend unavailable */ }
