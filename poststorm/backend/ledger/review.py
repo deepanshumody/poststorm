@@ -44,7 +44,7 @@ def resolve(session, tenant_id, exc_id, action, corrected=None, chosen_claim=Non
         if action == "correct":
             if not corrected:
                 raise ValueError("correct requires corrected fields")
-            post_line = line.model_copy(update=corrected)
+            post_line = LineItem(**{**line.model_dump(), **corrected})
             session.add(Feedback(
                 tenant_id=tenant_id, kind=ex.kind,
                 original_line=json.dumps(line.model_dump(mode="json")),

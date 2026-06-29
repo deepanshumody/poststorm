@@ -1,10 +1,11 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from backend.ledger import review, service
 from backend.ledger.db import make_memory_session
-from backend.ledger.models import Account, Event, Feedback
+from backend.ledger.models import Account, Entry, Event, Feedback
 from backend.reconcile import reconcile
 from backend.schema import Confidence, EventType, LineItem
 
@@ -104,3 +105,22 @@ def test_feedback_list_returns_correction():
     review.resolve(s, "demo", exc_id, "correct", corrected={"paid": 95.0})
     fb = review.feedback_list(s, "demo")
     assert len(fb) == 1 and fb[0]["corrected"]["paid"] == 95.0
+
+
+def test_correct_invalid_corrected_raises_and_leaves_exception_open():
+    """Spec §7: corrected dict failing LineItem validation must raise (ValidationError/ValueError)
+    and leave the exception open with no ledger entries created."""
+    s = make_memory_session()
+    low = _li(claim_id="C9", paid=10.0, confidence=Confidence.low)
+    service.post(s, "demo", "b1", [low], [])
+    exc_id = review.review_queue(s, "demo")[0]["id"]
+
+    with pytest.raises((ValidationError, ValueError)):
+        review.resolve(s, "demo", exc_id, "correct", corrected={"paid": "not-a-number"})
+
+    # Exception must still be open — no state change
+    q = review.review_queue(s, "demo")
+    assert len(q) == 1 and q[0]["id"] == exc_id and q[0]["status"] == "open"
+    # No ledger entries or feedback rows should have been written
+    assert s.query(Entry).count() == 0
+    assert s.query(Feedback).count() == 0

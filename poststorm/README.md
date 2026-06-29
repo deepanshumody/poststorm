@@ -116,15 +116,17 @@ Resolved lines are posted via `service.post_reviewed_line`, which writes an appe
 `reviewer` string. The `ReviewException` row is a **mutable work-item** (status `open → resolved / dismissed`);
 the ledger events it creates are immutable. Resolving an already-resolved exception is an idempotent no-op.
 
+The dashboard includes a **Review queue** panel that surfaces all open exceptions inline — approve, pick, correct, or dismiss without leaving the page; resolving an item refreshes the System-of-record strip automatically.
+
 **Endpoints:**
 
 | Endpoint | Returns |
 |---|---|
-| `GET /review/queue?status=open` | Open (or filtered) exceptions with line, kind, and candidate claim ids. |
+| `GET /review/queue?status=open` | Open (or filtered) exceptions with line, kind, and candidate claim ids (non-empty only for `ambiguous` exceptions; `low_confidence` exceptions carry an empty candidates list). |
 | `POST /review/{id}/resolve` | Resolve one exception; body `{action, corrected?, chosen_claim?}`; invalid input → 400. |
 | `GET /review/feedback` | All correction pairs (original vs. corrected) recorded so far. |
 
-> No auth/RBAC yet — reviewer identity is the string passed in the request body (default `"demo-reviewer"`).
+> No auth/RBAC yet — every API resolution is attributed to the default `"demo-reviewer"` (the `ResolveRequest` body carries no `reviewer` field); pluggable reviewer identity / RBAC is a future sub-project.
 
 ## How it works
 

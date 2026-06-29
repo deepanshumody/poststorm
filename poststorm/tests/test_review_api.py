@@ -62,3 +62,20 @@ def test_resolve_dismiss_ok():
     item = client.get("/review/queue").json()["items"][0]
     r = client.post(f"/review/{item['id']}/resolve", json={"action": "dismiss"})
     assert r.status_code == 200 and r.json()["status"] == "dismissed"
+
+
+def _seed_low_confidence():
+    """Seed a single low-confidence exception for correct-action tests."""
+    s = ledger_db.SessionLocal()
+    low = _li(claim_id="LC1", paid=10.0, confidence=Confidence.low)
+    service.post(s, "demo", "api_lc", [low], [])
+    s.close()
+
+
+def test_resolve_correct_invalid_corrected_returns_400():
+    """Spec §7: POST /review/{id}/resolve with an invalid corrected dict must return 400, not 500."""
+    _seed_low_confidence()
+    item = client.get("/review/queue").json()["items"][0]
+    r = client.post(f"/review/{item['id']}/resolve",
+                    json={"action": "correct", "corrected": {"paid": "abc"}})
+    assert r.status_code == 400
