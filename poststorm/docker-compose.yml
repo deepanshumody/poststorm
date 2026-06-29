@@ -12,3 +12,8 @@ services:
       CORS_ORIGINS: http://localhost:8000
       LOG_LEVEL: INFO
     restart: unless-stopped
+    volumes:
+      - ledger-data:/app/data
+
+volumes:
+  ledger-data:

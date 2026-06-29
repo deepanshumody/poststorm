@@ -41,6 +41,7 @@
 | `jobs.py` | async race orchestration → events | the above | network |
 | `main.py` | HTTP/SSE shell, validation, headers | jobs, config | network |
 | `logging_config.py` | structured stdlib logging | config | stderr |
+| **`ledger/`** | **durable event-sourced double-entry ledger** | SQLAlchemy, schema | DB |
 
 **The core is pure, the shell is thin.** `reconcile.py` has no I/O and is the most heavily unit-tested module — the
 catastrophic-exception-prone money math is deterministic, not model-driven. This mirrors the "deterministic agents win at
@@ -48,6 +49,21 @@ enterprise scale" thesis: *a 0.0001% exception rate is 100 exceptions on 1M tran
 strict-schema extraction; every line carries a `source_span` so a human can verify against the source image.
 
 Extraction is **provider-agnostic** (OpenAI-compatible Chat Completions), so swapping models/providers is a config change.
+
+## Ledger (system of record)
+
+`backend/ledger/` is an **append-only, event-sourced double-entry ledger** that durably records every financial posting.
+
+Key design decisions:
+
+- **Append-only events** — rows are never updated or deleted; the audit trail is immutable.
+- **Balanced double-entry** — every posting emits a debit entry and a matching credit entry; the two sides always sum to zero, so the ledger self-validates.
+- **Rebuildable projections** — running balances (`account_balance`) are derived projections rebuilt from raw events; calling `rebuild_projections()` at any time regenerates them from scratch.
+- **Idempotent on `line_key`** — each ledger line carries a deterministic composite key (tenant + batch + claim); duplicate postings (e.g. a retry) hit a `UNIQUE` constraint and are silently skipped via `IntegrityError` handling.
+- **Integer cents** — all amounts are stored as integer cents to avoid floating-point rounding drift.
+
+Storage: SQLite by default (`data/ledger.db`, volume-mounted in Docker via `ledger-data`); Postgres via `DATABASE_URL`.  
+Endpoints: `GET /ledger/balances` (current balances), `GET /ledger/audit` (raw event log).
 
 ## Recoupment detection (the core insight)
 
