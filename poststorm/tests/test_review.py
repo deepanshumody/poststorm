@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from backend.ledger import review, service
 from backend.ledger.db import make_memory_session
 from backend.ledger.models import Account, Event, Feedback
@@ -73,6 +75,32 @@ def test_pick_without_chosen_claim_raises():
     s = make_memory_session()
     _seed_ambiguous(s)
     exc_id = review.review_queue(s, "demo")[0]["id"]
-    import pytest
     with pytest.raises(ValueError):
         review.resolve(s, "demo", exc_id, "pick")
+
+
+def test_correct_without_corrected_raises():
+    s = make_memory_session()
+    low = _li(claim_id="C9", paid=10.0, confidence=Confidence.low)
+    service.post(s, "demo", "b1", [low], [])
+    exc_id = review.review_queue(s, "demo")[0]["id"]
+    with pytest.raises(ValueError):
+        review.resolve(s, "demo", exc_id, "correct")
+
+
+def test_unknown_action_raises():
+    s = make_memory_session()
+    _seed_ambiguous(s)
+    exc_id = review.review_queue(s, "demo")[0]["id"]
+    with pytest.raises(ValueError):
+        review.resolve(s, "demo", exc_id, "frobnicate")
+
+
+def test_feedback_list_returns_correction():
+    s = make_memory_session()
+    low = _li(claim_id="C9", paid=10.0, confidence=Confidence.low)
+    service.post(s, "demo", "b1", [low], [])
+    exc_id = review.review_queue(s, "demo")[0]["id"]
+    review.resolve(s, "demo", exc_id, "correct", corrected={"paid": 95.0})
+    fb = review.feedback_list(s, "demo")
+    assert len(fb) == 1 and fb[0]["corrected"]["paid"] == 95.0

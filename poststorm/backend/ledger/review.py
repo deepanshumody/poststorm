@@ -51,7 +51,7 @@ def resolve(session, tenant_id, exc_id, action, corrected=None, chosen_claim=Non
                 corrected_line=json.dumps(post_line.model_dump(mode="json")), reviewer=reviewer))
         # Remove the placeholder PostedLine (event_id=None) created by _exception
         # so that post_reviewed_line can create a real one with an event.
-        lk = line_key(tenant_id, post_line)
+        lk = line_key(tenant_id, line)
         placeholder = session.query(PostedLine).filter_by(tenant_id=tenant_id, line_key=lk).first()
         if placeholder and placeholder.event_id is None:
             session.delete(placeholder)
