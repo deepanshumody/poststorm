@@ -82,3 +82,34 @@ def test_idempotent_repost_skips():
     assert res2.posted == 0 and res2.skipped == 1
     assert s.query(Event).count() == 1
     assert s.query(PostedLine).count() == 1
+
+
+def test_balances_and_rebuild():
+    s = make_memory_session()
+    pay = _li(claim_id="C1", patient_ref="A", paid=842.50, check_number="CHK7")
+    take = _li(claim_id="R9", patient_ref="B", paid=-842.50, check_number="CHK7",
+               event_type=EventType.recoup, recoup_flag=True)
+    rr = reconcile([pay, take])
+    service.post(s, "demo", "b1", [pay, take], rr.recoups)
+
+    b = service.balances(s, "demo")
+    assert b["dump_exposure_cents"] == 84250
+    assert b["cash_received_cents"] == 84250     # one payment of 842.50
+    assert b["event_count"] == 2
+    assert b["payer_recoups_cents"].get("Aetna") == 84250
+
+    # projections are rebuildable from the event log
+    for a in s.query(Account).all():
+        a.balance_cents = 999
+    s.commit()
+    service.rebuild_projections(s, "demo")
+    assert service.balances(s, "demo")["dump_exposure_cents"] == 84250
+
+
+def test_audit_trail_has_provenance():
+    s = make_memory_session()
+    service.post(s, "demo", "b1", [_li(claim_id="C1", paid=80.0, source_span="C1 Aetna 80.00")], [])
+    trail = service.audit_trail(s, "demo")
+    assert trail and trail[0]["type"] == "payment"
+    assert trail[0]["source_span"] == "C1 Aetna 80.00"
+    assert len(trail[0]["entries"]) == 2

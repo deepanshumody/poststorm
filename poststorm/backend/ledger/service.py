@@ -123,3 +123,47 @@ def post(session, tenant_id, batch_id, lines, recoups) -> PostingResult:
         a.balance_cents for a in session.query(Account).filter_by(tenant_id=tenant_id, type="dump_account").all()
     )
     return res
+
+
+def balances(session, tenant_id) -> dict:
+    accts = session.query(Account).filter_by(tenant_id=tenant_id).all()
+    cash = sum(-a.balance_cents for a in accts if a.type == "provider_cash")   # payments debit cash
+    dump = sum(a.balance_cents for a in accts if a.type == "dump_account")
+    claims = {a.key: a.balance_cents for a in accts if a.type == "claim"}
+    payer: dict[str, int] = {}
+    for ev in session.query(Event).filter_by(tenant_id=tenant_id, type="recoup").all():
+        p = json.loads(ev.meta).get("payer", "?")
+        deb = session.query(Entry).filter_by(event_id=ev.id, direction="debit").first()
+        payer[p] = payer.get(p, 0) + (deb.amount_cents if deb else 0)
+    return {
+        "cash_received_cents": cash,
+        "dump_exposure_cents": dump,
+        "provider_net_cents": cash - dump,
+        "claim_count": len(claims),
+        "dump_account_count": sum(1 for a in accts if a.type == "dump_account"),
+        "payer_recoups_cents": payer,
+        "event_count": session.query(Event).filter_by(tenant_id=tenant_id).count(),
+    }
+
+
+def audit_trail(session, tenant_id, limit=50) -> list[dict]:
+    out = []
+    for ev in session.query(Event).filter_by(tenant_id=tenant_id).order_by(Event.id.desc()).limit(limit):
+        entries = session.query(Entry).filter_by(event_id=ev.id).all()
+        out.append({
+            "id": ev.id, "type": ev.type, "batch": ev.batch_id, "model": ev.model,
+            "confidence": ev.confidence, "source_span": ev.source_span, "meta": json.loads(ev.meta),
+            "entries": [{"account_id": e.account_id, "dir": e.direction,
+                         "cents": e.amount_cents, "reason": e.reason} for e in entries],
+        })
+    return out
+
+
+def rebuild_projections(session, tenant_id) -> None:
+    for a in session.query(Account).filter_by(tenant_id=tenant_id).all():
+        a.balance_cents = 0
+    session.flush()
+    for e in session.query(Entry).join(Event, Entry.event_id == Event.id).filter(Event.tenant_id == tenant_id):
+        acc = session.get(Account, e.account_id)
+        acc.balance_cents += e.amount_cents if e.direction == "credit" else -e.amount_cents
+    session.commit()
