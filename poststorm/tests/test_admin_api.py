@@ -24,10 +24,14 @@ def test_onboard_requires_admin():
 
 
 def test_rotate_issues_second_working_key():
-    admin.post("/admin/tenants", json={"tenant_id": "rot", "role": "viewer"})
+    onboard = admin.post("/admin/tenants", json={"tenant_id": "rot", "role": "viewer"})
+    raw1 = onboard.json()["api_key"]
     r = admin.post("/admin/tenants/rot/keys", json={"role": "viewer"})
     assert r.status_code == 200
     raw2 = r.json()["api_key"]
+    assert raw1 != raw2
+    # rotation is non-destructive: BOTH the old and the new key exchange for a token
+    assert client.post("/auth/token", json={"api_key": raw1}).status_code == 200
     assert client.post("/auth/token", json={"api_key": raw2}).status_code == 200
 
 

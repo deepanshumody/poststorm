@@ -292,7 +292,8 @@ def admin_revoke_key(kid: str,
     s = ledger_db.SessionLocal()
     try:
         ok = auth.revoke_key(s, kid)
-        s.commit()
+        if ok:
+            s.commit()
     finally:
         s.close()
     if not ok:
