@@ -3,12 +3,13 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from backend import auth
 from backend.config import get_settings
 from backend.jobs import run_job
 from backend.ledger import db as ledger_db
@@ -23,6 +24,13 @@ INDEX = ROOT / "frontend" / "index.html"
 
 log = get_logger("poststorm.api")
 settings = get_settings()
+
+
+def config_module_dev_secret() -> str:
+    from backend.config import DEV_JWT_SECRET
+    return DEV_JWT_SECRET
+
+
 VERSION = "0.1.0"
 MAX_JOBS = 64  # bounded in-memory store (single-node demo; no external DB by design)
 
@@ -42,6 +50,17 @@ try:
 except Exception:
     log.warning("ledger init_db failed; ledger persistence disabled this run", exc_info=True)
 
+try:
+    _seed_session = ledger_db.SessionLocal()
+    try:
+        auth.seed_tenants(_seed_session, settings)
+    finally:
+        _seed_session.close()
+    if settings.jwt_secret == config_module_dev_secret():
+        log.warning("JWT_SECRET is the insecure dev default — set a real secret in production")
+except Exception:
+    log.warning("tenant seeding failed; /auth/token may not work this run", exc_info=True)
+
 
 JOBS: dict[str, list[str]] = {}
 
@@ -54,6 +73,38 @@ class ResolveRequest(BaseModel):
     action: str
     corrected: dict | None = None
     chosen_claim: str | None = None
+
+
+class TokenRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/auth/token")
+def auth_token(req: TokenRequest):
+    s = ledger_db.SessionLocal()
+    try:
+        principal = auth.verify_api_key(s, req.api_key)
+    finally:
+        s.close()
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid api key",
+                            headers={"WWW-Authenticate": "Bearer"})
+    token = auth.issue_jwt(principal, settings.jwt_secret, settings.jwt_ttl_seconds)
+    return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
+
+
+@app.get("/auth/demo-token")
+def auth_demo_token():
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    principal = auth.Principal(tenant="demo", role="reviewer", sub="demo-key")
+    token = auth.issue_jwt(principal, settings.jwt_secret, settings.jwt_ttl_seconds)
+    return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
+
+
+@app.get("/auth/whoami")
+def auth_whoami(principal: auth.Principal = Depends(auth.require_principal)):  # noqa: B008
+    return {"tenant": principal.tenant, "role": principal.role, "sub": principal.sub}
 
 
 @app.get("/ledger/balances")

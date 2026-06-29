@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import jwt
+from fastapi import Header, HTTPException, Request
 
 from backend.ledger.models import ApiKey, Tenant
 
@@ -107,3 +108,29 @@ def seed_tenants(session, settings) -> None:
             if verify_api_key(session, raw) is None:  # idempotent: only seed once
                 issue_key(session, "demo", role, raw_key=raw)
         session.commit()
+
+
+def require_principal(request: Request, authorization: str | None = Header(default=None)) -> Principal:
+    cached = getattr(request.state, "principal", None)
+    if cached is not None:
+        return cached
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    from backend.config import get_settings  # local import avoids an import cycle at module load
+    try:
+        principal = verify_jwt(authorization[7:], get_settings().jwt_secret)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="invalid or expired token",
+                            headers={"WWW-Authenticate": "Bearer"}) from e
+    request.state.principal = principal
+    return principal
+
+
+def require_role(minimum: str):
+    def dep(request: Request, authorization: str | None = Header(default=None)) -> Principal:
+        principal = require_principal(request, authorization)
+        if not role_at_least(principal.role, minimum):
+            raise HTTPException(status_code=403, detail="insufficient role")
+        return principal
+    return dep
