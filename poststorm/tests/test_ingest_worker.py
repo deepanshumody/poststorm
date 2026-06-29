@@ -1,9 +1,28 @@
+import pytest
+
 from backend.extract import ExtractionResult
 from backend.ingest import queue as q
 from backend.ingest import worker
-from backend.ingest.models import Document, IngestJob
+from backend.ingest.models import Document, Extraction, IngestJob
 from backend.ledger import db as ledger_db
 from backend.schema import Confidence, EventType, LineItem
+
+_WORKER_TEST_TENANTS = ("wk_a", "wk_b", "wk_c")
+
+
+@pytest.fixture(autouse=True)
+def _worker_db():
+    ledger_db.init_db()  # ensure tables exist when this file runs in isolation
+    s = ledger_db.SessionLocal()
+    try:
+        for tenant in _WORKER_TEST_TENANTS:
+            s.query(Extraction).filter(Extraction.tenant_id == tenant).delete()
+            s.query(Document).filter(Document.tenant_id == tenant).delete()
+            s.query(IngestJob).filter(IngestJob.tenant_id == tenant).delete()
+        s.commit()
+    finally:
+        s.close()
+    yield
 
 
 def _li(**kw):
