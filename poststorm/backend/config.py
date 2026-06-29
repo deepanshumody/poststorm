@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     max_upload_mb: int = 15               # per-file upload size cap
     upload_dir: str = "./data/uploads"    # tenant-scoped blob storage root
 
+    # Write-back / delivery (sub-project E)
+    writeback_destinations: str = "file"          # comma list of active destinations: file, webhook
+    writeback_webhook_url: str = ""               # empty → webhook destination is skipped
+    writeback_webhook_secret: str = "dev-writeback-secret"  # HMAC-SHA256 signing secret
+    writeback_max_attempts: int = 5
+    writeback_workers: int = 2
+    writeback_idle_sleep: float = 0.25
+    export_dir: str = "./data/exports"
+
 
 @lru_cache
 def get_settings() -> Settings:

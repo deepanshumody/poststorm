@@ -1,5 +1,7 @@
 import asyncio
 import glob
+import hashlib
+import hmac
 import json
 import secrets
 import uuid
@@ -8,7 +10,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -24,6 +26,8 @@ from backend.ledger import review as ledger_review
 from backend.ledger import service as ledger_service
 from backend.ledger.models import AuditLog, _now
 from backend.logging_config import get_logger
+from backend.writeback import worker as wb_worker
+from backend.writeback.models import Delivery
 
 ROOT = Path(__file__).resolve().parents[1]
 EOBS = ROOT / "data" / "eobs"
@@ -53,13 +57,17 @@ async def lifespan(app):
     try:
         ingest_worker.recover_orphans(_s)
         ingest_queue.finalize_stranded_jobs(_s)
+        wb_worker.recover_orphans(_s)
     except Exception:
-        log.warning("ingest startup recovery failed", exc_info=True)
+        log.warning("startup recovery failed", exc_info=True)
     finally:
         _s.close()
     _worker_stop = asyncio.Event()
     _worker_tasks = [asyncio.create_task(ingest_worker.worker_loop(_worker_stop))
                      for _ in range(settings.ingest_workers)]
+    _worker_tasks += [asyncio.create_task(wb_worker.worker_loop(_worker_stop))
+                      for _ in range(settings.writeback_workers)]
+    _worker_tasks.append(asyncio.create_task(wb_worker.relay_loop(_worker_stop)))
     try:
         yield
     finally:
@@ -98,6 +106,8 @@ except Exception:
 JOBS: dict[str, tuple[str, list[str]]] = {}
 STREAM_TICKETS: dict[str, tuple[str, str]] = {}  # ticket -> (jid, tenant); single-use
 MAX_TICKETS = 256
+WB_SINK: list = []      # dev-only: received webhook postings (bounded)
+WB_SINK_MAX = 256
 
 
 def _new_stream_ticket(job_id: str, tenant: str) -> str:
@@ -122,6 +132,8 @@ def _audit_action(method: str, path: str) -> str:
         return _AUDIT_ACTIONS[(method, path)]
     if method == "POST" and path.startswith("/ingest/documents/") and path.endswith("/retry"):
         return "document.retry"
+    if method == "POST" and path.startswith("/writeback/deliveries/") and path.endswith("/retry"):
+        return "writeback.retry"
     if method == "POST" and path.startswith("/review/") and path.endswith("/resolve"):
         return "review.resolve"
     if method == "POST" and path.startswith("/admin/tenants/") and path.endswith("/keys"):
@@ -332,6 +344,75 @@ def ingest_retry_document(doc_id: str,
         s.close()
 
 
+@app.post("/writeback/mock-sink")
+async def writeback_mock_sink(request: Request):
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    body = await request.body()
+    expected = "sha256=" + hmac.new(settings.writeback_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(request.headers.get("X-Signature", ""), expected):
+        raise HTTPException(status_code=401, detail="bad signature")
+    key = request.headers.get("Idempotency-Key", "")
+    if any(x["idempotency_key"] == key for x in WB_SINK):
+        return JSONResponse({"status": "duplicate"}, status_code=409)
+    if len(WB_SINK) >= WB_SINK_MAX:
+        WB_SINK.pop(0)
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    WB_SINK.append({"idempotency_key": key, "body": parsed})
+    return {"status": "received"}
+
+
+@app.get("/writeback/mock-sink")
+def writeback_mock_sink_list(principal: auth.Principal = Depends(auth.require_role("viewer")),
+                             _rl: auth.Principal = Depends(ratelimit.enforce)):
+    # Dev-only, demo_mode-gated: a GLOBAL stand-in for a single external receiver — it returns
+    # ALL received postings (not tenant-scoped). Not for shared multi-tenant prod.
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"received": WB_SINK[-50:]}
+
+
+@app.get("/writeback/deliveries")
+def writeback_deliveries(status: str | None = None,
+                         principal: auth.Principal = Depends(auth.require_role("viewer")),
+                         _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        q = s.query(Delivery).filter_by(tenant_id=principal.tenant)
+        if status:
+            q = q.filter_by(status=status)
+        rows = q.order_by(Delivery.id.desc()).limit(200)
+        return {"deliveries": [{"id": d.id, "event_id": d.event_id, "destination": d.destination,
+                                "status": d.status, "attempts": d.attempts, "last_error": d.last_error,
+                                "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None}
+                               for d in rows]}
+    finally:
+        s.close()
+
+
+@app.post("/writeback/deliveries/{delivery_id}/retry")
+def writeback_retry(delivery_id: int,
+                    principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                    _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        d = s.get(Delivery, delivery_id)
+        if d is None or d.tenant_id != principal.tenant:
+            raise HTTPException(status_code=404, detail="delivery not found")
+        if d.status in ("dead", "failed"):
+            d.status = "pending"
+            d.attempts = 0
+            d.last_error = None
+            d.updated_at = _now()
+            s.commit()
+        return {"id": d.id, "status": d.status}
+    finally:
+        s.close()
+
+
 @app.get("/ingest/jobs/{job_id}/stream")
 async def ingest_job_stream(job_id: str, ticket: str = ""):
     bound = STREAM_TICKETS.pop(ticket, None)  # single-use
@@ -373,7 +454,7 @@ async def audit_log(request: Request, call_next):
     action = _audit_action(method, path)
     is_auth_token = (method == "POST" and path == "/auth/token")
     if method in _AUDITED_METHODS and (
-        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/")) or is_auth_token):
+        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/", "/writeback/")) or is_auth_token):
         principal = getattr(request.state, "principal", None)
         s = ledger_db.SessionLocal()
         try:
