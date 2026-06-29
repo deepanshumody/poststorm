@@ -24,6 +24,7 @@ from backend.ledger import review as ledger_review
 from backend.ledger import service as ledger_service
 from backend.ledger.models import AuditLog, _now
 from backend.logging_config import get_logger
+from backend.writeback import worker as wb_worker
 
 ROOT = Path(__file__).resolve().parents[1]
 EOBS = ROOT / "data" / "eobs"
@@ -53,13 +54,17 @@ async def lifespan(app):
     try:
         ingest_worker.recover_orphans(_s)
         ingest_queue.finalize_stranded_jobs(_s)
+        wb_worker.recover_orphans(_s)
     except Exception:
-        log.warning("ingest startup recovery failed", exc_info=True)
+        log.warning("startup recovery failed", exc_info=True)
     finally:
         _s.close()
     _worker_stop = asyncio.Event()
     _worker_tasks = [asyncio.create_task(ingest_worker.worker_loop(_worker_stop))
                      for _ in range(settings.ingest_workers)]
+    _worker_tasks += [asyncio.create_task(wb_worker.worker_loop(_worker_stop))
+                      for _ in range(settings.writeback_workers)]
+    _worker_tasks.append(asyncio.create_task(wb_worker.relay_loop(_worker_stop)))
     try:
         yield
     finally:
