@@ -39,7 +39,9 @@
 | `baseline.py` | Gemini GPU baseline (timing) | httpx, config | network |
 | **`reconcile.py`** | **pure** recoupment + ledger engine | schema only | **none** |
 | `jobs.py` | async race orchestration → events | the above | network |
-| `main.py` | HTTP/SSE shell, validation, headers | jobs, config | network |
+| **`auth.py`** | **API-key + JWT identity layer** (`Principal`, `require_role`, `issue_jwt`, `verify_api_key`) | PyJWT, models | DB (key lookup) |
+| **`ratelimit.py`** | **per-tenant token-bucket rate limiter** (`RateLimiter`, `enforce` FastAPI dep) | auth, config | none |
+| `main.py` | HTTP/SSE shell, validation, headers, audit middleware | jobs, auth, ratelimit, config | network |
 | `logging_config.py` | structured stdlib logging | config | stderr |
 | **`ledger/`** | **durable event-sourced double-entry ledger** | SQLAlchemy, schema | DB |
 | `ledger/review.py` | review queue + resolve actions (approve / pick / correct / dismiss) | ledger/service, models | DB |
@@ -84,7 +86,17 @@ human (or the auto path for unambiguous high-confidence lines) signs off on it.
 **Feedback seam:** every `correct` action records a `Feedback` row (original vs. corrected line + reviewer).
 The pairs are stored for future use — not yet consumed for retraining.
 
-> No auth/RBAC yet — reviewer identity is the string in the request body.
+Reviewer identity is the JWT `sub` claim (the issuing key's `kid`), passed to `service.post_reviewed_line` and recorded in the ledger event. See **Authentication & multi-tenancy** below.
+
+## Authentication & multi-tenancy
+
+**Identity lives at the edge.** `auth.py` supplies the `Principal(tenant, role, sub)` dataclass and two FastAPI dependencies — `require_principal` (validates the `Authorization: Bearer` JWT on every request) and `require_role(minimum)` (checks `viewer < reviewer < admin` and raises 403 if the caller's role is below the threshold). `ratelimit.enforce` wraps `require_principal` and enforces the per-tenant token bucket before the handler body runs.
+
+**The data layer was already tenant-scoped.** Every ledger query, review-queue lookup, and job result is filtered by `principal.tenant`. Endpoints simply pass `principal.tenant` down; no handler reaches across tenant boundaries. A request for another tenant's resource returns 404 — the server does not leak the existence of foreign rows.
+
+**Two distinct audit trails.** The `AuditLog` table (`auth.py` + the `audit_log` middleware in `main.py`) records *access events* — who called which mutating endpoint, from which key, with what HTTP outcome. This is independent of the ledger's `LedgerEvent` table, which records *money events* — financial postings and their balanced debit/credit entries. Access ≠ money; keeping the two logs separate prevents coupling between the security audit and the financial audit.
+
+**JWTs in the header, never the URL.** The `Authorization: Bearer` header keeps tokens out of server logs, browser history, and referrer chains. The one exception is the EventSource stream (`GET /jobs/{jid}/stream`), which cannot carry a custom header from a browser — this endpoint uses a **single-use `stream_ticket`**: `POST /jobs` returns a short-lived opaque ticket; the client passes it as a URL query parameter; the server pops the ticket on first use (it is never valid a second time, and it binds to the specific job and tenant).
 
 ## Recoupment detection (the core insight)
 

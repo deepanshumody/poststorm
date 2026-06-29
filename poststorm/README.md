@@ -126,7 +126,91 @@ The dashboard includes a **Review queue** panel that surfaces all open exception
 | `POST /review/{id}/resolve` | Resolve one exception; body `{action, corrected?, chosen_claim?}`; invalid input → 400. |
 | `GET /review/feedback` | All correction pairs (original vs. corrected) recorded so far. |
 
-> No auth/RBAC yet — every API resolution is attributed to the default `"demo-reviewer"` (the `ResolveRequest` body carries no `reviewer` field); pluggable reviewer identity / RBAC is a future sub-project.
+Reviewer identity is taken from the JWT `sub` claim (the issuing key's `kid`) and recorded in the ledger event. A `reviewer`-role JWT is required to call `POST /review/{id}/resolve` — see **Security & multi-tenancy** below.
+
+## Security & multi-tenancy
+
+PostStorm implements a full tenant-aware auth layer so multiple billing offices can share one deployment without seeing each other's data.
+
+### Identity model
+
+Every tenant is issued one or more **API keys** with the format `pk_<tenant>_<random>`.  
+The raw key is shown exactly once at issuance and is never stored in plaintext — the server persists only `sha256(per_key_salt + raw_key)` alongside the salt.  
+To obtain a session token, POST the raw key:
+
+```
+POST /auth/token   {"api_key": "pk_acme_..."}
+→ {"access_token": "<jwt>", "token_type": "bearer", "expires_in": 1800}
+```
+
+The returned token is a **short-lived HS256 JWT** (`{sub: kid, tenant, role, iat, exp}`; default TTL 1800 s).  
+Send it as `Authorization: Bearer <jwt>` on every data request.  
+Missing, invalid, or expired tokens → **401**; insufficient role → **403**.
+
+### Roles
+
+Three roles in ascending order: `viewer < reviewer < admin`.
+
+| Role | Can do |
+|---|---|
+| `viewer` | `GET /ledger/balances`, `GET /ledger/audit`, `GET /review/queue`, `GET /review/feedback` |
+| `reviewer` | viewer + `POST /jobs`, `POST /review/{id}/resolve` |
+| `admin` | reviewer + `GET /admin/audit`, `POST /admin/tenants`, `POST /admin/tenants/{id}/keys`, `DELETE /admin/keys/{kid}` |
+
+### Tenant isolation
+
+Every data-layer query is scoped to `principal.tenant`.  
+A request for a resource owned by a different tenant returns **404** — the server does not reveal whether the resource exists for another tenant.
+
+### Rate limiting
+
+Requests are subject to a **per-tenant token-bucket** limiter (default: burst capacity 60, refill 5 req/s).  
+Exhausting the bucket returns **429** with a `Retry-After` header (seconds until the next token is available).  
+Override defaults with `RATE_BURST` and `RATE_RPS`.
+
+### Audit log
+
+Every mutating request (`POST`, `PUT`, `PATCH`, `DELETE`) against `/jobs`, `/review/*`, `/admin/*`, and `/auth/token` (token issuance) is recorded in an **append-only** `AuditLog` table with: `action`, `resource`, `principal` (key id), `tenant`, `status_code`, and `created_at`.  
+`GET /admin/audit` (admin role) returns the log scoped to the caller's tenant.
+
+### Admin operations
+
+```
+POST   /admin/tenants                     # create tenant + issue an initial key
+POST   /admin/tenants/{tenant_id}/keys    # rotate / issue additional keys
+DELETE /admin/keys/{kid}                  # revoke a key immediately
+```
+
+All three are admin-only and return the new `api_key` in the response (shown once).
+
+### Demo & development
+
+`GET /auth/demo-token` (enabled when `DEMO_MODE=true`, the default) issues a reviewer-role JWT for the `demo` tenant without requiring an API key — intended for the dashboard and local development only.
+
+On startup, `SEED_TENANTS` (comma-separated `<tenant>:<role>` pairs, default `demo:reviewer`) creates tenant rows.  
+Only the `demo` entry also seeds a deterministic API key (derived from `JWT_SECRET`); all other entries create the tenant row only — an admin must issue keys for them.
+
+### Environment knobs
+
+| Var | Default | Purpose |
+|---|---|---|
+| `JWT_SECRET` | `dev-insecure-change-me` | HS256 signing secret. The server logs a warning when the dev default is detected at startup. Set a real secret in production. |
+| `JWT_TTL_SECONDS` | `1800` | JWT lifetime in seconds. |
+| `DEMO_MODE` | `true` | Enables `GET /auth/demo-token`. Disable in production. |
+| `SEED_TENANTS` | `demo:reviewer` | Comma-separated `<tenant>:<role>` pairs seeded on startup. |
+| `RATE_BURST` | `60` | Token-bucket capacity per tenant. |
+| `RATE_RPS` | `5.0` | Token-bucket refill rate (requests/second). |
+| `ADMIN_BOOTSTRAP_KEY` | _(empty)_ | Raw admin key available for production bootstrap. |
+
+### Extension points (not built)
+
+The following are intentionally out of scope for this demo build:
+
+- **External OIDC / IdP federation** — the `/auth/token` client-credentials flow is a drop-in seam; a future `POST /auth/oidc/token` could validate a third-party ID token and issue the same JWT.
+- **KMS-backed key storage** — the current `sha256(salt + key)` hash is sufficient for demo scale; production deployments with stricter requirements would store key material in AWS KMS / GCP Cloud KMS.
+- **Redis-backed rate limiting** — the in-memory token bucket is single-node; swap `ratelimit.RateLimiter` for a Redis-backed implementation to enforce limits across replicas.
+
+---
 
 ## How it works
 
