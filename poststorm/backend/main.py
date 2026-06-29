@@ -22,7 +22,7 @@ from backend.jobs import run_job
 from backend.ledger import db as ledger_db
 from backend.ledger import review as ledger_review
 from backend.ledger import service as ledger_service
-from backend.ledger.models import AuditLog
+from backend.ledger.models import AuditLog, _now
 from backend.logging_config import get_logger
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,12 +112,15 @@ _AUDIT_ACTIONS = {
     ("POST", "/jobs"): "job.create",
     ("POST", "/admin/tenants"): "tenant.create",
     ("POST", "/documents"): "document.upload",
+    ("POST", "/documents/demo-batch"): "ingest.demo_batch",
 }
 
 
 def _audit_action(method: str, path: str) -> str:
     if (method, path) in _AUDIT_ACTIONS:
         return _AUDIT_ACTIONS[(method, path)]
+    if method == "POST" and path.startswith("/ingest/documents/") and path.endswith("/retry"):
+        return "document.retry"
     if method == "POST" and path.startswith("/review/") and path.endswith("/resolve"):
         return "review.resolve"
     if method == "POST" and path.startswith("/admin/tenants/") and path.endswith("/keys"):
@@ -282,6 +285,81 @@ async def upload_documents(files: list[UploadFile] = File(...),
                 "stream_ticket": _new_stream_ticket(job_id, principal.tenant)}
     finally:
         s.close()
+
+
+@app.post("/documents/demo-batch")
+def documents_demo_batch(count: int = 6,
+                         principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                         _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        paths = ingest_storage.fixture_paths(max(1, min(count, settings.max_batch)))
+        specs = [ingest_queue.DocSpec(doc_id="d_" + uuid.uuid4().hex[:12], filename=Path(p).name,
+                                      content_type="image/png", storage_path=p) for p in paths]
+        job_id = ingest_queue.enqueue_job(s, principal.tenant, specs)
+        docs = s.query(Document).filter_by(job_id=job_id).all()
+        return {"job_id": job_id,
+                "documents": [{"id": d.id, "filename": d.filename, "status": d.status} for d in docs],
+                "stream_ticket": _new_stream_ticket(job_id, principal.tenant)}
+    finally:
+        s.close()
+
+
+@app.post("/ingest/documents/{doc_id}/retry")
+def ingest_retry_document(doc_id: str,
+                          principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                          _rl: auth.Principal = Depends(ratelimit.enforce)):
+    s = ledger_db.SessionLocal()
+    try:
+        doc = s.get(Document, doc_id)
+        if doc is None or doc.tenant_id != principal.tenant:
+            raise HTTPException(status_code=404, detail="document not found")
+        if doc.status == "failed":
+            doc.status = "pending"
+            doc.error = None
+            doc.attempts = 0
+            doc.updated_at = _now()
+            job = s.get(IngestJob, doc.job_id)
+            if job is not None and job.status in ("finalized", "partially_failed"):
+                job.status = "processing"
+                job.finalized_at = None
+            s.commit()
+        return {"id": doc.id, "status": doc.status}
+    finally:
+        s.close()
+
+
+@app.get("/ingest/jobs/{job_id}/stream")
+async def ingest_job_stream(job_id: str, ticket: str = ""):
+    bound = STREAM_TICKETS.pop(ticket, None)  # single-use
+    if bound is None or bound[0] != job_id:
+        raise HTTPException(status_code=404, detail="job not found")
+    tenant = bound[1]
+
+    async def gen():
+        last = None
+        for _ in range(600):  # ~5 min ceiling at 0.5s/tick
+            s = ledger_db.SessionLocal()
+            try:
+                job = s.get(IngestJob, job_id)
+                if job is None or job.tenant_id != tenant:
+                    return
+                docs = s.query(Document).filter_by(job_id=job_id).all()
+                snap = {"status": job.status,
+                        "documents": [{"id": d.id, "status": d.status, "error": d.error} for d in docs]}
+                payload = json.dumps(snap, sort_keys=True)
+                if payload != last:
+                    last = payload
+                    yield f"data: {json.dumps({'type': 'status', **snap})}\n\n"
+                if job.status in ("finalized", "partially_failed"):
+                    yield ("data: " + json.dumps({"type": "finalized", "status": job.status,
+                           "post_summary": json.loads(job.post_summary) if job.post_summary else None}) + "\n\n")
+                    return
+            finally:
+                s.close()
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.middleware("http")
