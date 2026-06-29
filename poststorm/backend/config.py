@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     admin_bootstrap_key: str = ""         # raw admin key seeded in prod (empty = none)
     demo_mode: bool = True                # enables GET /auth/demo-token for the dashboard
 
+    # Ingest pipeline (sub-projects A+B)
+    ingest_workers: int = 4               # in-process worker loop count
+    ingest_max_attempts: int = 3          # document-level retry ceiling before "failed"
+    ingest_idle_sleep: float = 0.25       # worker poll interval when the queue is empty (seconds)
+    max_upload_mb: int = 15               # per-file upload size cap
+    upload_dir: str = "./data/uploads"    # tenant-scoped blob storage root
+
 
 @lru_cache
 def get_settings() -> Settings:

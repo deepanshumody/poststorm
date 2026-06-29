@@ -128,6 +128,69 @@ The dashboard includes a **Review queue** panel that surfaces all open exception
 
 Reviewer identity is taken from the JWT `sub` claim (the issuing key's `kid`) and recorded in the ledger event. A `reviewer`-role JWT is required to call `POST /review/{id}/resolve` — see **Security & multi-tenancy** below.
 
+## Durable ingest & extraction
+
+The synchronous race demo (above) processes EOBs as part of a live-streamed job. The durable pipeline accepts real uploads or fixture batches, persists every step to SQLite, and survives server restarts. Both paths run alongside each other without interference.
+
+### Intake routes
+
+| Endpoint | Description |
+|---|---|
+| `POST /documents` | Multipart upload — one or more PDF / PNG / JPEG files. Reviewer role required. Validates content type (415) and file size (413) before writing. Returns `job_id` + `stream_ticket`. |
+| `POST /documents/demo-batch?count=N` | Seeds N fixture EOBs (from `data/eobs/`) through the same durable pipeline without a file upload. Returns `job_id` + `stream_ticket`. |
+
+### Pipeline
+
+Intake persists one `IngestJob` + one `Document` row per file, all with status `pending`.
+Lifespan-managed asyncio workers (started at server startup, stopped cleanly on shutdown) claim
+documents atomically (`pending → processing`, predicate-guarded so no two workers claim the same doc),
+then extract with Cerebras — reusing the same retry/backoff as the synchronous race.
+Multi-page documents are supported: each page is extracted in sequence and the items are concatenated
+into a single `Extraction` row.
+Once every document in a job reaches a terminal state, `maybe_finalize_job` reconciles the extracted
+lines from the successfully-extracted subset and posts them to the ledger (idempotent via
+the ledger's `line_key` unique constraint).
+
+### Partial-failure policy
+
+A failed document does not block finalize. When all docs are terminal and at least one failed, the job
+status becomes `partially_failed`; the successful subset is still posted. Recoups whose offset lies in
+a failed document are held in the review queue until the doc is retried.
+`POST /ingest/documents/{doc_id}/retry` (reviewer role) resets the doc to `pending` and reopens the
+job to `processing` — workers will pick it up and attempt extraction again (up to `INGEST_MAX_ATTEMPTS`
+total attempts across all retry calls).
+
+### Status and streaming
+
+| Endpoint | Description |
+|---|---|
+| `GET /ingest/jobs/{job_id}` | Viewer role. Returns per-document status, attempt counts, error strings, and `post_summary` once the job is finalized. |
+| `GET /ingest/jobs/{job_id}/stream?ticket=<ticket>` | SSE stream of status snapshots. The single-use ticket is minted at intake time and consumed on first connection — the JWT never appears in a URL. |
+
+### Restart-survivable
+
+All job and document state lives in SQLite. On startup, `recover_orphans` resets any `Document` rows
+left in `processing` (abandoned by a previous crash mid-flight) back to `pending`, so workers
+re-try them automatically.
+
+### Configuration knobs
+
+| Var | Default | Purpose |
+|---|---|---|
+| `INGEST_WORKERS` | `4` | Number of in-process asyncio worker tasks started at lifespan. |
+| `INGEST_MAX_ATTEMPTS` | `3` | Per-document attempt ceiling; exhausted → `failed`. |
+| `INGEST_IDLE_SLEEP` | `0.25` | Worker poll interval (seconds) when the queue is empty. |
+| `MAX_UPLOAD_MB` | `15` | Maximum upload file size for `POST /documents`. |
+| `UPLOAD_DIR` | `./data/uploads` | Root directory for uploaded files; tenant-isolated subdirectories are created automatically. |
+
+### Extension points (not built)
+
+The following are intentionally out of scope for this demo build:
+
+- **External broker (Redis / Celery)** — the in-process `worker_loop` is the natural swap point for a distributed task queue when multi-node scale is needed.
+- **Multi-node workers** — the atomic predicate claim works correctly with multiple processes against PostgreSQL; SQLite's write lock limits the current deploy to a single node.
+- **Encryption-at-rest / PHI handling** — uploaded files are stored as-written; this build uses synthetic data only. Production deployments handling real EOBs would add at-rest encryption and PHI controls before persisting uploads.
+
 ## Security & multi-tenancy
 
 PostStorm implements a full tenant-aware auth layer so multiple billing offices can share one deployment without seeing each other's data.
