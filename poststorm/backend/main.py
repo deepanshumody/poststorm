@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from backend.config import get_settings
 from backend.jobs import run_job
+from backend.ledger import db as ledger_db
+from backend.ledger import service as ledger_service
 from backend.logging_config import get_logger
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +35,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.mount("/eobs", StaticFiles(directory=str(EOBS)), name="eobs")
+
+ledger_db.init_db()
+
+
+@app.get("/ledger/balances")
+def ledger_balances():
+    s = ledger_db.SessionLocal()
+    try:
+        return ledger_service.balances(s, "demo")
+    finally:
+        s.close()
+
+
+@app.get("/ledger/audit")
+def ledger_audit(limit: int = 50):
+    s = ledger_db.SessionLocal()
+    try:
+        return {"events": ledger_service.audit_trail(s, "demo", min(limit, 200))}
+    finally:
+        s.close()
+
 
 JOBS: dict[str, list[str]] = {}
 
