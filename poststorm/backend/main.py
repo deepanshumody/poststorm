@@ -105,6 +105,16 @@ class TokenRequest(BaseModel):
     api_key: str
 
 
+class TenantRequest(BaseModel):
+    tenant_id: str
+    name: str | None = None
+    role: str = "reviewer"
+
+
+class KeyRequest(BaseModel):
+    role: str = "reviewer"
+
+
 @app.post("/auth/token")
 def auth_token(req: TokenRequest):
     s = ledger_db.SessionLocal()
@@ -248,6 +258,46 @@ def admin_audit(limit: int = 100,
                             "created_at": r.created_at.isoformat()} for r in rows]}
     finally:
         s.close()
+
+
+@app.post("/admin/tenants")
+def admin_create_tenant(req: TenantRequest,
+                        principal: auth.Principal = Depends(auth.require_role("admin"))):
+    s = ledger_db.SessionLocal()
+    try:
+        auth.create_tenant(s, req.tenant_id, req.name or "")
+        kid, raw = auth.issue_key(s, req.tenant_id, req.role)
+        s.commit()
+        return {"tenant_id": req.tenant_id, "kid": kid, "api_key": raw, "role": req.role}
+    finally:
+        s.close()
+
+
+@app.post("/admin/tenants/{tenant_id}/keys")
+def admin_issue_key(tenant_id: str, req: KeyRequest,
+                    principal: auth.Principal = Depends(auth.require_role("admin"))):
+    s = ledger_db.SessionLocal()
+    try:
+        auth.create_tenant(s, tenant_id)  # no-op if it already exists
+        kid, raw = auth.issue_key(s, tenant_id, req.role)
+        s.commit()
+        return {"tenant_id": tenant_id, "kid": kid, "api_key": raw, "role": req.role}
+    finally:
+        s.close()
+
+
+@app.delete("/admin/keys/{kid}")
+def admin_revoke_key(kid: str,
+                     principal: auth.Principal = Depends(auth.require_role("admin"))):
+    s = ledger_db.SessionLocal()
+    try:
+        ok = auth.revoke_key(s, kid)
+        s.commit()
+    finally:
+        s.close()
+    if not ok:
+        raise HTTPException(status_code=404, detail="key not found")
+    return {"kid": kid, "revoked": True}
 
 
 @app.get("/")
