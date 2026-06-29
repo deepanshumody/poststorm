@@ -3,7 +3,10 @@ import uuid
 from dataclasses import dataclass
 
 from backend.ingest.models import Document, Extraction, IngestJob
+from backend.ledger import service as ledger_service
 from backend.ledger.models import _now
+from backend.reconcile import reconcile
+from backend.schema import LineItem
 
 
 @dataclass
@@ -60,3 +63,36 @@ def mark_failed(session, document, error: str, max_attempts: int) -> None:
         document.status = "pending"  # reset for another attempt
     document.updated_at = _now()
     session.commit()
+
+
+def _job_line_items(session, job_id: str, tenant_id: str) -> list:
+    items: list = []
+    docs = (session.query(Document)
+            .filter_by(job_id=job_id, tenant_id=tenant_id, status="extracted").all())
+    for d in docs:
+        ex = (session.query(Extraction).filter_by(document_id=d.id)
+              .order_by(Extraction.id.desc()).first())
+        if ex is None:
+            continue
+        items.extend(LineItem(**raw) for raw in json.loads(ex.line_items_json))
+    return items
+
+
+def maybe_finalize_job(session, job_id: str):
+    job = session.get(IngestJob, job_id)
+    if job is None or job.status in ("finalized", "partially_failed"):
+        return None  # idempotent: already terminal
+    docs = session.query(Document).filter_by(job_id=job_id).all()
+    if not docs or any(d.status in ("pending", "processing") for d in docs):
+        return None  # not all documents are terminal yet
+    items = _job_line_items(session, job_id, job.tenant_id)
+    rr = reconcile(items)
+    pr = ledger_service.post(session, job.tenant_id, job_id, items, rr.recoups)
+    any_failed = any(d.status == "failed" for d in docs)
+    job.status = "partially_failed" if any_failed else "finalized"
+    job.finalized_at = _now()
+    job.post_summary = json.dumps({"posted": pr.posted, "skipped": pr.skipped,
+                                   "exceptions": pr.exceptions, "events": pr.events,
+                                   "dump_exposure_cents": pr.dump_exposure_cents})
+    session.commit()
+    return pr
