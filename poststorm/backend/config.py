@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:8000"
     log_level: str = "INFO"
     max_batch: int = 48  # hard cap on documents per job (fan-out / cost guard)
+    database_url: str = "sqlite:///./data/ledger.db"
 
 
 @lru_cache
