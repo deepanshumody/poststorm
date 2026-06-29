@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -127,7 +128,7 @@ def require_principal(request: Request, authorization: str | None = Header(defau
     return principal
 
 
-def require_role(minimum: str):
+def require_role(minimum: str) -> Callable[..., Principal]:
     def dep(request: Request, authorization: str | None = Header(default=None)) -> Principal:
         principal = require_principal(request, authorization)
         if not role_at_least(principal.role, minimum):

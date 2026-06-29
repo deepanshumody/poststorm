@@ -103,7 +103,7 @@ def auth_demo_token():
 
 
 @app.get("/auth/whoami")
-def auth_whoami(principal: auth.Principal = Depends(auth.require_principal)):  # noqa: B008
+def auth_whoami(principal: auth.Principal = Depends(auth.require_principal)):
     return {"tenant": principal.tenant, "role": principal.role, "sub": principal.sub}
 
 

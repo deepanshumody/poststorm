@@ -34,7 +34,13 @@ def test_demo_token_endpoint_issues_usable_jwt():
     assert r.status_code == 200
     token = r.json()["access_token"]
     who = client.get("/auth/whoami", headers={"Authorization": f"Bearer {token}"})
-    assert who.status_code == 200 and who.json()["tenant"] == "demo"
+    assert who.status_code == 200 and who.json()["tenant"] == "demo" and who.json()["role"] == "reviewer"
+
+
+def test_demo_token_disabled_when_demo_mode_off(monkeypatch):
+    from backend import main
+    monkeypatch.setattr(main.settings, "demo_mode", False)
+    assert client.get("/auth/demo-token").status_code == 404
 
 
 def test_expired_or_garbage_token_is_401():
