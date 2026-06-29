@@ -168,5 +168,13 @@ def test_post_reviewed_payment():
     line = _li(claim_id="C1", patient_ref="A", paid=80.0)
     eid = service.post_reviewed_line(s, "demo", "review", line, as_recoup=False,
                                      chosen_claim=None, reviewer="demo-reviewer")
-    from backend.ledger.models import Account
+    assert eid is not None
+    from backend.ledger.models import Account, Entry
     assert s.query(Account).filter_by(type="claim", key="C1").one().balance_cents == 8000
+    assert s.query(Account).filter_by(type="provider_cash", key="main").one().balance_cents == -8000
+    es = s.query(Entry).filter_by(event_id=eid).all()
+    assert sum(e.amount_cents for e in es if e.direction == "debit") == \
+           sum(e.amount_cents for e in es if e.direction == "credit") == 8000
+    # idempotent
+    assert service.post_reviewed_line(s, "demo", "review", line, as_recoup=False,
+                                      chosen_claim=None, reviewer="demo-reviewer") is None

@@ -178,7 +178,7 @@ def rebuild_projections(session, tenant_id) -> None:
     session.commit()
 
 
-def post_reviewed_line(session, tenant_id, batch_id, line, as_recoup, chosen_claim, reviewer):
+def post_reviewed_line(session, tenant_id, batch_id, line, as_recoup, chosen_claim, reviewer) -> int | None:
     lk = line_key(tenant_id, line)
     if session.query(PostedLine).filter_by(tenant_id=tenant_id, line_key=lk).first():
         return None
