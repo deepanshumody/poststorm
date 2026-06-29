@@ -313,7 +313,7 @@ workers claim and push each delivery to the destination, completing the lockbox-
 | `POST /writeback/mock-sink` | — | Dev-only loopback: verifies `X-Signature`, deduplicates on `Idempotency-Key`, stores the payload. Gated by `DEMO_MODE=true`. |
 | `GET /writeback/mock-sink` | viewer | List payloads received by the mock sink. |
 
-The mock sink lets the demo show end-to-end signed delivery without a real downstream system.
+The mock sink lets the demo show end-to-end signed delivery without a real downstream system. The mock sink is a global demo stand-in (not tenant-scoped) and is `demo_mode`-gated.
 
 ### Configuration knobs
 

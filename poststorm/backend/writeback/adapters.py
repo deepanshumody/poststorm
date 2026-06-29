@@ -46,7 +46,7 @@ def deliver_webhook(posting: dict, settings, client: httpx.Client | None = None)
     client = client or httpx.Client(timeout=10)
     try:
         r = client.post(settings.writeback_webhook_url, content=body, headers=headers)
-        if r.status_code in (200, 201, 202, 204, 409):
+        if (200 <= r.status_code < 300) or r.status_code == 409:
             return DeliveryResult(ok=True, retryable=False, detail=f"http_{r.status_code}", payload_sha256=digest)
         if r.status_code >= 500:
             return DeliveryResult(ok=False, retryable=True, detail=f"webhook_{r.status_code}", payload_sha256=digest)

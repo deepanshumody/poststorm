@@ -34,34 +34,44 @@ def deliver_one(tenant_id: str | None = None) -> bool:
         d = claim_next(s, tenant_id)
         if d is None:
             return False
-        settings = get_settings()
-        ev = s.get(Event, d.event_id)
-        if ev is None:
-            d.status = "failed"
-            d.last_error = "event_missing"
+        try:
+            settings = get_settings()
+            ev = s.get(Event, d.event_id)
+            if ev is None:
+                d.status = "failed"
+                d.last_error = "event_missing"
+                d.updated_at = _now()
+                s.commit()
+                return True
+            posting = build_posting(s, ev, d.destination)
+            if d.destination == "file":
+                res = adapters.deliver_file(posting, d.tenant_id, settings)
+            elif d.destination == "webhook":
+                res = adapters.deliver_webhook(posting, settings)
+            else:
+                res = adapters.DeliveryResult(False, False, "unknown_destination", "")
+            if res.ok:
+                d.status = "delivered"
+                d.delivered_at = _now()
+                d.payload_sha256 = res.payload_sha256
+                d.last_error = None
+            elif res.retryable:
+                d.status = "dead" if d.attempts >= settings.writeback_max_attempts else "pending"
+                d.last_error = res.detail[:200]
+            else:
+                d.status = "failed"
+                d.last_error = res.detail[:200]
             d.updated_at = _now()
             s.commit()
-            return True
-        posting = build_posting(s, ev, d.destination)
-        if d.destination == "file":
-            res = adapters.deliver_file(posting, d.tenant_id, settings)
-        elif d.destination == "webhook":
-            res = adapters.deliver_webhook(posting, settings)
-        else:
-            res = adapters.DeliveryResult(False, False, "unknown_destination", "")
-        if res.ok:
-            d.status = "delivered"
-            d.delivered_at = _now()
-            d.payload_sha256 = res.payload_sha256
-            d.last_error = None
-        elif res.retryable:
-            d.status = "dead" if d.attempts >= settings.writeback_max_attempts else "pending"
-            d.last_error = res.detail[:200]
-        else:
-            d.status = "failed"
-            d.last_error = res.detail[:200]
-        d.updated_at = _now()
-        s.commit()
+        except Exception:
+            log.exception("writeback delivery failed unexpectedly for %s", d.id)
+            s.rollback()
+            d = s.get(Delivery, d.id)  # re-fetch (rollback expired it); the claim's 'delivering' is durable
+            if d is not None:
+                d.status = "dead" if d.attempts >= get_settings().writeback_max_attempts else "pending"
+                d.last_error = "internal_error"
+                d.updated_at = _now()
+                s.commit()
         return True
     finally:
         s.close()
@@ -91,7 +101,7 @@ async def worker_loop(stop_event, idle_sleep: float | None = None) -> None:
 async def relay_loop(stop_event, idle_sleep: float | None = None) -> None:
     settings = get_settings()
     idle = idle_sleep if idle_sleep is not None else settings.writeback_idle_sleep
-    dests = [x.strip() for x in settings.writeback_destinations.split(",") if x.strip()]
+    dests = relay.active_destinations(settings)
 
     def _relay():
         sess = ledger_db.SessionLocal()

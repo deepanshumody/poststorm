@@ -368,6 +368,8 @@ async def writeback_mock_sink(request: Request):
 @app.get("/writeback/mock-sink")
 def writeback_mock_sink_list(principal: auth.Principal = Depends(auth.require_role("viewer")),
                              _rl: auth.Principal = Depends(ratelimit.enforce)):
+    # Dev-only, demo_mode-gated: a GLOBAL stand-in for a single external receiver — it returns
+    # ALL received postings (not tenant-scoped). Not for shared multi-tenant prod.
     if not settings.demo_mode:
         raise HTTPException(status_code=404, detail="not found")
     return {"received": WB_SINK[-50:]}

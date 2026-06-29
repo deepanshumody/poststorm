@@ -6,6 +6,14 @@ from backend.writeback.models import Delivery
 from backend.writeback.payload import idempotency_key
 
 
+def active_destinations(settings) -> list[str]:
+    """Configured destinations, dropping any that aren't usable (webhook with no URL)."""
+    dests = [x.strip() for x in settings.writeback_destinations.split(",") if x.strip()]
+    if not settings.writeback_webhook_url:
+        dests = [d for d in dests if d != "webhook"]
+    return dests
+
+
 def enqueue_pending(session, destinations: list[str], limit: int = 500) -> int:
     """For each destination, create a pending Delivery for every Event that has no Delivery yet.
     Idempotent: the (tenant_id, event_id, destination) unique constraint makes a re-run a no-op."""

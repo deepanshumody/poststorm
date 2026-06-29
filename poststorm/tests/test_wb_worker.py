@@ -107,6 +107,23 @@ def test_webhook_permanent_4xx_fails(monkeypatch):
         s.close()
 
 
+def test_deliver_one_unexpected_exception_resets_row(monkeypatch):
+    monkeypatch.setattr("backend.writeback.worker.build_posting",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom internal://secret")))
+    _seed_one_event("wb_a")
+    s = ledger_db.SessionLocal()
+    relay.enqueue_pending(s, ["file"])
+    s.close()
+    assert worker.deliver_one("wb_a") is True
+    s = ledger_db.SessionLocal()
+    try:
+        d = s.query(Delivery).filter_by(tenant_id="wb_a").one()
+        assert d.status == "pending"          # reset, not stuck in 'delivering'
+        assert d.last_error == "internal_error"  # redacted — the secret is NOT in last_error
+    finally:
+        s.close()
+
+
 def test_recover_orphans_resets_delivering():
     _seed_one_event("wb_d")
     s = ledger_db.SessionLocal()

@@ -29,3 +29,10 @@ def test_enqueue_is_idempotent_on_rerun():
     assert relay.enqueue_pending(s, ["file"]) == 1
     assert relay.enqueue_pending(s, ["file"]) == 0  # nothing new
     assert s.query(Delivery).filter_by(destination="file").count() == 1
+
+
+def test_active_destinations_drops_webhook_without_url():
+    from backend.config import Settings
+    assert relay.active_destinations(Settings(writeback_destinations="file,webhook", writeback_webhook_url="")) == ["file"]
+    assert relay.active_destinations(Settings(writeback_destinations="file,webhook",
+                                              writeback_webhook_url="https://x/hook")) == ["file", "webhook"]

@@ -55,3 +55,10 @@ def test_deliver_webhook_no_url_is_permanent_fail(monkeypatch):
     monkeypatch.setattr(get_settings(), "writeback_webhook_url", "")
     res = adapters.deliver_webhook(_POSTING, get_settings())
     assert not res.ok and not res.retryable
+
+
+def test_deliver_webhook_206_is_success(monkeypatch):
+    monkeypatch.setattr(get_settings(), "writeback_webhook_url", "https://sink.test/hook")
+    res = adapters.deliver_webhook(_POSTING, get_settings(),
+                                   client=_client(lambda req: httpx.Response(206)))
+    assert res.ok and not res.retryable
