@@ -10,3 +10,4 @@ python-dotenv==1.2.2
 pytest==9.1.1
 sqlalchemy==2.0.51
 PyJWT==2.10.1
+python-multipart==0.0.32  # FastAPI multipart parsing for POST /documents uploads
