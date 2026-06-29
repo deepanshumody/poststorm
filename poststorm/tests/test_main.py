@@ -57,3 +57,26 @@ def test_stream_without_ticket_is_404():
 
 def test_stream_with_bad_ticket_is_404():
     assert client.get("/jobs/deadbeef/stream?ticket=nope").status_code == 404
+
+
+def test_stream_ticket_is_single_use_and_opens_stream(monkeypatch):
+    from backend import main
+
+    async def fake_run_job(tenant, paths):
+        yield {"type": "start", "total": 0}
+        yield {"type": "done", "elapsed_ms": 0, "errors": 0}
+
+    monkeypatch.setattr(main, "run_job", fake_run_job)
+
+    job = rc.post("/jobs", json={"count": 1}).json()
+    jid, ticket = job["job_id"], job["stream_ticket"]
+
+    # First use: valid ticket opens the SSE stream.
+    r1 = client.get(f"/jobs/{jid}/stream?ticket={ticket}")
+    assert r1.status_code == 200
+    assert r1.headers["content-type"].startswith("text/event-stream")
+    assert "data:" in r1.text
+
+    # Second use: the same ticket was consumed → 404 (single-use enforced).
+    r2 = client.get(f"/jobs/{jid}/stream?ticket={ticket}")
+    assert r2.status_code == 404
