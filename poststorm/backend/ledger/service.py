@@ -129,17 +129,18 @@ def balances(session, tenant_id) -> dict:
     accts = session.query(Account).filter_by(tenant_id=tenant_id).all()
     cash = sum(-a.balance_cents for a in accts if a.type == "provider_cash")   # payments debit cash
     dump = sum(a.balance_cents for a in accts if a.type == "dump_account")
-    claims = {a.key: a.balance_cents for a in accts if a.type == "claim"}
+    claim_count = sum(1 for a in accts if a.type == "claim")
     payer: dict[str, int] = {}
     for ev in session.query(Event).filter_by(tenant_id=tenant_id, type="recoup").all():
         p = json.loads(ev.meta).get("payer", "?")
-        deb = session.query(Entry).filter_by(event_id=ev.id, direction="debit").first()
-        payer[p] = payer.get(p, 0) + (deb.amount_cents if deb else 0)
+        debit_total = sum(e.amount_cents for e in
+                          session.query(Entry).filter_by(event_id=ev.id, direction="debit").all())
+        payer[p] = payer.get(p, 0) + debit_total
     return {
         "cash_received_cents": cash,
         "dump_exposure_cents": dump,
         "provider_net_cents": cash - dump,
-        "claim_count": len(claims),
+        "claim_count": claim_count,
         "dump_account_count": sum(1 for a in accts if a.type == "dump_account"),
         "payer_recoups_cents": payer,
         "event_count": session.query(Event).filter_by(tenant_id=tenant_id).count(),
