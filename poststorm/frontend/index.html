@@ -230,6 +230,14 @@
       <div class="scroll"><table><thead><tr><th class="l">entity</th><th class="l">dir</th><th>amount</th><th class="l">reason</th><th class="l">dump acct</th></tr></thead>
         <tbody id="ledgerBody"><tr><td class="empty" colspan="5">Ledger builds after the batch is read.</td></tr></tbody></table></div>
     </section>
+  <section class="card panel" style="min-height:auto">
+    <h3>System of record <span class="c" id="sorState"></span></h3>
+    <div class="body" style="padding:12px 16px;font-family:var(--mono);font-size:12px;color:var(--dim)">
+      <span>events appended <b id="sorEvents" style="color:var(--fg)">0</b></span> &nbsp;·&nbsp;
+      <span>dump-account exposure <b id="sorDump" style="color:var(--warn)">$0.00</b></span> &nbsp;·&nbsp;
+      <span id="sorIdem"></span>
+    </div>
+  </section>
   </div>
 </div>
 
@@ -391,7 +399,17 @@ $("run").onclick=async()=>{
       if(ev.line_items.length) pending.push(ev); else { cerSeen++; advanceCer(); }
     }
     else if(ev.type==="gem"){ onGem(ev); }
-    else if(ev.type==="ledger"){ ledgerData=ev; }
+    else if(ev.type==="ledger"){ ledgerData=ev;
+      const sor=ev.system_of_record;
+      if(sor){
+        $("sorEvents").textContent=sor.events;
+        $("sorDump").textContent="$"+money(sor.dump_exposure_cents/100);
+        $("sorIdem").innerHTML = sor.posted>0
+          ? `posted <b style="color:var(--pos)">${sor.posted}</b> new`
+          : `<b style="color:var(--pos)">idempotent</b> — re-run posted 0 new`;
+        $("sorState").textContent="durable · SQLite";
+      }
+    }
     else if(ev.type==="cer_done"){ cerFrozen=true; clearInterval(cerTimerIv); $("cerTimer").textContent=(ev.elapsed_ms/1000).toFixed(2)+"s"; ev._cer=true; window._cerSec=ev.elapsed_ms/1000; }
     else if(ev.type==="gem_done"){ clearInterval(gemTimerIv); showVerdict({completed:ev.completed,avg_ms:ev.avg_ms,cer_sec:window._cerSec}); }
     else if(ev.type==="done"){ es.close(); $("run").disabled=false; maybeClimax(); }
