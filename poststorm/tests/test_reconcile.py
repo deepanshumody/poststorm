@@ -47,3 +47,14 @@ def test_ambiguous_match_goes_to_needs_review():
     r = reconcile.reconcile([a, b, take])
     assert any(x.status == "needs_review" for x in r.recoups)
     assert take in r.needs_review
+
+
+def test_ambiguous_recoup_surfaces_candidate_claims():
+    a = _li(claim_id="C1", patient_ref="P-A", paid=50.0, check_number="CHK7")
+    b = _li(claim_id="C2", patient_ref="P-B", paid=50.0, check_number="CHK7")
+    take = _li(claim_id="C3", patient_ref="P-C", paid=-50.0, check_number="CHK7",
+               event_type=EventType.recoup, recoup_flag=True)
+    r = reconcile.reconcile([a, b, take])
+    nr = [x for x in r.recoups if x.status == "needs_review"]
+    assert len(nr) == 1
+    assert set(nr[0].candidates) == {"C1", "C2"}

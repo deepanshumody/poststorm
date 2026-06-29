@@ -23,6 +23,7 @@ class Recoup:
     dump_account_id: str | None
     amount: float
     status: str  # "matched" | "needs_review"
+    candidates: list = field(default_factory=list)
 
 
 @dataclass
@@ -77,7 +78,8 @@ def reconcile(line_items: list[LineItem]) -> ReconcileResult:
                                       "original payment intact", orig.claim_id, dump,
                                       [orig.claim_id]))
         else:
-            recoups.append(Recoup(rl.claim_id, None, False, None, amt, "needs_review"))
+            recoups.append(Recoup(rl.claim_id, None, False, None, amt, "needs_review",
+                                  [c.claim_id for c in cross]))
             needs_review.append(rl)
 
     totals = {
