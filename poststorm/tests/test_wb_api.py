@@ -1,8 +1,41 @@
+import hashlib
+import hmac
+import json
 import uuid
 
+from fastapi.testclient import TestClient
+
+from backend import main
+from backend.config import get_settings
 from backend.ledger import db as ledger_db
+from backend.main import app
 from backend.writeback.models import Delivery
 from tests._auth import authed_client
+
+
+def _sign(body: bytes, secret: str) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+def test_mock_sink_accepts_signed_dedups_and_rejects_bad_sig(monkeypatch):
+    monkeypatch.setattr(get_settings(), "writeback_webhook_secret", "s3cret")
+    client = TestClient(app)
+    body = json.dumps({"idempotency_key": "mk1", "type": "payment"}, sort_keys=True).encode()
+    good = {"X-Signature": _sign(body, "s3cret"), "Idempotency-Key": "mk1", "content-type": "application/json"}
+    assert client.post("/writeback/mock-sink", content=body, headers=good).status_code == 200
+    # duplicate idempotency key → 409
+    assert client.post("/writeback/mock-sink", content=body, headers=good).status_code == 409
+    # bad signature → 401
+    bad = {"X-Signature": "sha256=deadbeef", "Idempotency-Key": "mk2", "content-type": "application/json"}
+    assert client.post("/writeback/mock-sink", content=body, headers=bad).status_code == 401
+
+
+def test_mock_sink_404_when_demo_mode_off(monkeypatch):
+    monkeypatch.setattr(main.settings, "demo_mode", False)
+    client = TestClient(app)
+    body = b"{}"
+    headers = {"X-Signature": _sign(body, get_settings().writeback_webhook_secret), "Idempotency-Key": "x"}
+    assert client.post("/writeback/mock-sink", content=body, headers=headers).status_code == 404
 
 
 def _seed_delivery(tenant, status="dead", dest=None):

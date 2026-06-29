@@ -1,5 +1,7 @@
 import asyncio
 import glob
+import hashlib
+import hmac
 import json
 import secrets
 import uuid
@@ -8,7 +10,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -104,6 +106,8 @@ except Exception:
 JOBS: dict[str, tuple[str, list[str]]] = {}
 STREAM_TICKETS: dict[str, tuple[str, str]] = {}  # ticket -> (jid, tenant); single-use
 MAX_TICKETS = 256
+WB_SINK: list = []      # dev-only: received webhook postings (bounded)
+WB_SINK_MAX = 256
 
 
 def _new_stream_ticket(job_id: str, tenant: str) -> str:
@@ -338,6 +342,35 @@ def ingest_retry_document(doc_id: str,
         return {"id": doc.id, "status": doc.status}
     finally:
         s.close()
+
+
+@app.post("/writeback/mock-sink")
+async def writeback_mock_sink(request: Request):
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    body = await request.body()
+    expected = "sha256=" + hmac.new(settings.writeback_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(request.headers.get("X-Signature", ""), expected):
+        raise HTTPException(status_code=401, detail="bad signature")
+    key = request.headers.get("Idempotency-Key", "")
+    if any(x["idempotency_key"] == key for x in WB_SINK):
+        return JSONResponse({"status": "duplicate"}, status_code=409)
+    if len(WB_SINK) >= WB_SINK_MAX:
+        WB_SINK.pop(0)
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    WB_SINK.append({"idempotency_key": key, "body": parsed})
+    return {"status": "received"}
+
+
+@app.get("/writeback/mock-sink")
+def writeback_mock_sink_list(principal: auth.Principal = Depends(auth.require_role("viewer")),
+                             _rl: auth.Principal = Depends(ratelimit.enforce)):
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"received": WB_SINK[-50:]}
 
 
 @app.get("/writeback/deliveries")
