@@ -1,12 +1,28 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.ledger import db as ledger_db
 from backend.ledger import service
+from backend.ledger.models import PostedLine, ReviewException
 from backend.main import app
 from backend.reconcile import reconcile
 from backend.schema import Confidence, EventType, LineItem
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolate_review_tables():
+    """Clear review exceptions and placeholder PostedLine rows before each test
+    so _seed() can always create fresh exceptions."""
+    s = ledger_db.SessionLocal()
+    try:
+        s.query(ReviewException).delete()
+        s.query(PostedLine).filter(PostedLine.event_id.is_(None)).delete()
+        s.commit()
+    finally:
+        s.close()
+    yield
 
 
 def _li(**kw):
