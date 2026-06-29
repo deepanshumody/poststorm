@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from backend import auth
+from backend import auth, ratelimit
 from backend.config import get_settings
 from backend.jobs import run_job
 from backend.ledger import db as ledger_db
@@ -134,7 +134,8 @@ def auth_whoami(principal: auth.Principal = Depends(auth.require_principal)):
 
 
 @app.get("/ledger/balances")
-def ledger_balances(principal: auth.Principal = Depends(auth.require_role("viewer"))):
+def ledger_balances(principal: auth.Principal = Depends(auth.require_role("viewer")),
+                    _rl: auth.Principal = Depends(ratelimit.enforce)):
     s = ledger_db.SessionLocal()
     try:
         return ledger_service.balances(s, principal.tenant)
@@ -143,7 +144,8 @@ def ledger_balances(principal: auth.Principal = Depends(auth.require_role("viewe
 
 
 @app.get("/ledger/audit")
-def ledger_audit(limit: int = 50, principal: auth.Principal = Depends(auth.require_role("viewer"))):
+def ledger_audit(limit: int = 50, principal: auth.Principal = Depends(auth.require_role("viewer")),
+                 _rl: auth.Principal = Depends(ratelimit.enforce)):
     s = ledger_db.SessionLocal()
     try:
         return {"events": ledger_service.audit_trail(s, principal.tenant, max(0, min(limit, 200)))}
@@ -153,7 +155,8 @@ def ledger_audit(limit: int = 50, principal: auth.Principal = Depends(auth.requi
 
 @app.get("/review/queue")
 def review_queue(status: str = "open",
-                 principal: auth.Principal = Depends(auth.require_role("viewer"))):
+                 principal: auth.Principal = Depends(auth.require_role("viewer")),
+                 _rl: auth.Principal = Depends(ratelimit.enforce)):
     s = ledger_db.SessionLocal()
     try:
         return {"items": ledger_review.review_queue(s, principal.tenant, status)}
@@ -163,7 +166,8 @@ def review_queue(status: str = "open",
 
 @app.post("/review/{exc_id}/resolve")
 def review_resolve(exc_id: int, req: ResolveRequest,
-                   principal: auth.Principal = Depends(auth.require_role("reviewer"))):
+                   principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                   _rl: auth.Principal = Depends(ratelimit.enforce)):
     s = ledger_db.SessionLocal()
     try:
         return ledger_review.resolve(s, principal.tenant, exc_id, req.action,
@@ -177,7 +181,8 @@ def review_resolve(exc_id: int, req: ResolveRequest,
 
 
 @app.get("/review/feedback")
-def review_feedback(principal: auth.Principal = Depends(auth.require_role("viewer"))):
+def review_feedback(principal: auth.Principal = Depends(auth.require_role("viewer")),
+                    _rl: auth.Principal = Depends(ratelimit.enforce)):
     s = ledger_db.SessionLocal()
     try:
         return {"feedback": ledger_review.feedback_list(s, principal.tenant)}
@@ -251,7 +256,8 @@ def index():
 
 
 @app.post("/jobs")
-def create_job(req: JobRequest, principal: auth.Principal = Depends(auth.require_role("reviewer"))):
+def create_job(req: JobRequest, principal: auth.Principal = Depends(auth.require_role("reviewer")),
+               _rl: auth.Principal = Depends(ratelimit.enforce)):
     n = min(req.count, settings.max_batch)
     paths = _full_pngs()[:n]
     meta = _doc_meta()
