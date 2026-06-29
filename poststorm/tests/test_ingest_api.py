@@ -132,6 +132,12 @@ def test_retry_reopens_finalized_job():
     assert other.post("/ingest/documents/d_rt2/retry").status_code == 404
 
 
+def test_upload_empty_files_is_422():
+    rc = authed_client(role="reviewer", tenant="up_a")
+    # multipart with no file parts → handler guard returns 422 (not a zombie job)
+    assert rc.post("/documents", files={}).status_code in (422,)
+
+
 def test_stream_emits_finalized_for_terminal_job():
     s = ledger_db.SessionLocal()
     s.add(IngestJob(id="j_strm", tenant_id="st_a", status="finalized", doc_count=1,

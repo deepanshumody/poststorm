@@ -52,8 +52,9 @@ async def lifespan(app):
     _s = ledger_db.SessionLocal()
     try:
         ingest_worker.recover_orphans(_s)
+        ingest_queue.finalize_stranded_jobs(_s)
     except Exception:
-        log.warning("orphan recovery failed", exc_info=True)
+        log.warning("ingest startup recovery failed", exc_info=True)
     finally:
         _s.close()
     _worker_stop = asyncio.Event()
@@ -266,6 +267,8 @@ def ingest_job_status(job_id: str,
 async def upload_documents(files: list[UploadFile] = File(...),
                            principal: auth.Principal = Depends(auth.require_role("reviewer")),
                            _rl: auth.Principal = Depends(ratelimit.enforce)):
+    if not files:
+        raise HTTPException(status_code=422, detail="no files provided")
     s = ledger_db.SessionLocal()
     try:
         specs = []

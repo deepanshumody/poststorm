@@ -48,6 +48,41 @@ def test_finalize_waits_for_in_flight_docs():
     assert s.get(IngestJob, "j_2").status == "processing"
 
 
+def test_finalize_stranded_rescues_extracted_but_unfinalized_job():
+    # Simulates a crash AFTER the last doc was recorded extracted but BEFORE finalize ran:
+    # job stuck "processing", post_summary NULL, all docs terminal.
+    s = make_memory_session()
+    s.add(IngestJob(id="j_str", tenant_id="demo", status="processing", doc_count=1))
+    _extracted_doc(s, "j_str", "demo", "d_str", [_li(claim_id="SP1", paid=50.0)])
+    assert s.get(IngestJob, "j_str").post_summary is None
+    n = q.finalize_stranded_jobs(s)
+    assert n == 1
+    job = s.get(IngestJob, "j_str")
+    assert job.status == "finalized" and job.post_summary is not None
+    assert json.loads(job.post_summary)["posted"] == 1
+
+
+def test_finalize_stranded_handles_zero_doc_job():
+    s = make_memory_session()
+    s.add(IngestJob(id="j_empty", tenant_id="demo", status="pending", doc_count=0))
+    s.commit()
+    q.finalize_stranded_jobs(s)
+    job = s.get(IngestJob, "j_empty")
+    assert job.status == "finalized" and json.loads(job.post_summary)["posted"] == 0
+
+
+def test_concurrent_finalize_does_not_clobber_summary():
+    # Two finalize calls on the same all-terminal job: the first posts (posted==1), the second
+    # must NOT overwrite the summary with posted:0.
+    s = make_memory_session()
+    s.add(IngestJob(id="j_cc", tenant_id="demo", status="processing", doc_count=1))
+    _extracted_doc(s, "j_cc", "demo", "d_cc", [_li(claim_id="CC1", paid=50.0)])
+    pr1 = q.maybe_finalize_job(s, "j_cc")
+    assert pr1 is not None and pr1.posted == 1
+    assert q.maybe_finalize_job(s, "j_cc") is None  # second call no-ops
+    assert json.loads(s.get(IngestJob, "j_cc").post_summary)["posted"] == 1  # not clobbered to 0
+
+
 def test_partial_failure_finalizes_subset_and_recoup_goes_to_review():
     s = make_memory_session()
     s.add(IngestJob(id="j_3", tenant_id="demo", status="processing", doc_count=2))

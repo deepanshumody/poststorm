@@ -55,7 +55,11 @@ def recover_orphans(session) -> int:
 async def worker_loop(stop_event, idle_sleep: float | None = None) -> None:
     idle = idle_sleep if idle_sleep is not None else get_settings().ingest_idle_sleep
     while not stop_event.is_set():
-        did = await asyncio.to_thread(process_one)
+        try:
+            did = await asyncio.to_thread(process_one)
+        except Exception:
+            log.exception("ingest worker iteration failed; continuing")
+            did = False
         if not did:
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=idle)

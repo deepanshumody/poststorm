@@ -78,21 +78,55 @@ def _job_line_items(session, job_id: str, tenant_id: str) -> list:
     return items
 
 
-def maybe_finalize_job(session, job_id: str):
-    job = session.get(IngestJob, job_id)
-    if job is None or job.status in ("finalized", "partially_failed"):
-        return None  # idempotent: already terminal
-    docs = session.query(Document).filter_by(job_id=job_id).all()
-    if not docs or any(d.status in ("pending", "processing") for d in docs):
-        return None  # not all documents are terminal yet
-    items = _job_line_items(session, job_id, job.tenant_id)
+def _post_and_summarize(session, job, docs):
+    """Reconcile the extracted subset, post to the ledger, and record the summary.
+    Idempotent via the ledger's PostedLine unique constraint, so a re-run after a crash
+    re-posts nothing but still records the (correct) summary."""
+    items = _job_line_items(session, job.id, job.tenant_id)
     rr = reconcile(items)
-    pr = ledger_service.post(session, job.tenant_id, job_id, items, rr.recoups)
-    any_failed = any(d.status == "failed" for d in docs)
-    job.status = "partially_failed" if any_failed else "finalized"
+    pr = ledger_service.post(session, job.tenant_id, job.id, items, rr.recoups)
+    job.status = "partially_failed" if any(d.status == "failed" for d in docs) else "finalized"
     job.finalized_at = _now()
     job.post_summary = json.dumps({"posted": pr.posted, "skipped": pr.skipped,
                                    "exceptions": pr.exceptions, "events": pr.events,
                                    "dump_exposure_cents": pr.dump_exposure_cents})
     session.commit()
     return pr
+
+
+def maybe_finalize_job(session, job_id: str):
+    """Finalize a job once all its documents are terminal. Single-winner under concurrency:
+    only the worker that atomically transitions the job out of non-terminal status posts and
+    writes the summary; concurrent callers return None without posting. `post_summary IS NULL`
+    is the real 'not done' signal (status alone is a TOCTOU race)."""
+    job = session.get(IngestJob, job_id)
+    if job is None or job.post_summary is not None:
+        return None  # already fully finalized
+    docs = session.query(Document).filter_by(job_id=job_id).all()
+    if docs and any(d.status in ("pending", "processing") for d in docs):
+        return None  # work still in flight
+    target = "partially_failed" if any(d.status == "failed" for d in docs) else "finalized"
+    # Atomic single-winner claim: only one caller transitions non-terminal -> target.
+    claimed = (session.query(IngestJob)
+               .filter(IngestJob.id == job_id,
+                       IngestJob.status.notin_(("finalized", "partially_failed")))
+               .update({"status": target}, synchronize_session=False))
+    session.commit()
+    if claimed == 0:
+        return None  # another worker already claimed the finalize
+    return _post_and_summarize(session, session.get(IngestJob, job_id), docs)
+
+
+def finalize_stranded_jobs(session):
+    """Startup rescue (single-threaded, before workers start): post any job whose documents are
+    all terminal but which was never fully finalized (post_summary IS NULL) — e.g. a worker died
+    between recording the last extraction and finalizing, or a 0-document job. Returns the count."""
+    jobs = session.query(IngestJob).filter(IngestJob.post_summary.is_(None)).all()
+    n = 0
+    for job in jobs:
+        docs = session.query(Document).filter_by(job_id=job.id).all()
+        if docs and any(d.status in ("pending", "processing") for d in docs):
+            continue  # still has claimable work; a worker will finalize it
+        _post_and_summarize(session, job, docs)
+        n += 1
+    return n
