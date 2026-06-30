@@ -26,5 +26,6 @@ poststorm/.venv/
 poststorm/data/
 poststorm/data/uploads/
 poststorm/data/exports/
+poststorm/data/eval/
 poststorm/**/__pycache__/
 poststorm/.pytest_cache/
