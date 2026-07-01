@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend import auth, ratelimit
+from backend import metrics as metrics_module
 from backend.config import get_settings
 from backend.ingest import queue as ingest_queue
 from backend.ingest import storage as ingest_storage
@@ -601,3 +602,12 @@ async def stream(jid: str, ticket: str = ""):
 @app.get("/health")
 def health():
     return {"ok": True, "version": VERSION, "model": settings.cerebras_model, "docs": len(_full_pngs())}
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    s = ledger_db.SessionLocal()
+    try:
+        return Response(metrics_module.render_metrics(s), media_type="text/plain; version=0.0.4")
+    finally:
+        s.close()
