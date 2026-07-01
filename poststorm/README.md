@@ -338,6 +338,66 @@ The following are intentionally out of scope for this demo build:
 - **External broker** — the in-process `worker_loop` / `relay_loop` are the natural swap-points for a distributed task
   queue (Redis / Celery) when multi-node scale is needed.
 
+## Observability & eval
+
+### Eval harness
+
+The eval harness scores the pipeline against `data/ground_truth.json` using a **pure, deterministic scorer** — no network calls, no side effects.
+
+Three scoring dimensions:
+
+- **Extraction field-accuracy** — for every claim id that appears in both the extraction and the ground truth, each field (paid, charge, allowed, adjustment, claim\_id, payer, patient\_ref, carc, recoup\_flag, event\_type) is compared. Money fields are compared to the cent (`EVAL_MONEY_TOLERANCE_CENTS`; default 0 = exact). Reports overall accuracy and per-field breakdown.
+- **Recoup precision / recall / F1** — precision is over the auto-resolved `matched` set (caught planted claims / all matched claims); recall counts both `matched` and `needs_review` recoup claims as detected (a claim the engine routes to review is still caught, not missed); F1 is the harmonic mean.
+- **Confidence calibration** — error rates for `low`- vs `high`-confidence lines among matched claims (does the model's self-reported confidence predict actual errors?).
+
+**Run it:**
+
+```bash
+# CLI — extracts the fixture corpus, writes EVAL_DIR/report.json
+python -m backend.eval.run
+
+# HTTP — reviewer role required
+POST /eval/run          # runs and writes the report; returns the report JSON
+GET  /eval/report       # viewer role — returns the most recent report JSON (404 if none)
+```
+
+### Prometheus metrics
+
+`GET /metrics` is **open** (no auth, like `/health`) and returns aggregate-only operational gauges in Prometheus text format. No PHI, no per-tenant labels.
+
+Exposed metrics:
+
+| Metric | Description |
+|---|---|
+| `poststorm_ledger_events` | Total ledger events |
+| `poststorm_dump_exposure_cents` | Parked dump-account balance (cents) |
+| `poststorm_review_exceptions{status=...}` | Review exceptions by status |
+| `poststorm_deliveries{status=...}` | Deliveries by status |
+| `poststorm_ingest_jobs{status=...}` | Ingest jobs by status |
+| `poststorm_documents{status=...}` | Documents by status |
+| `poststorm_field_accuracy` | Latest eval: overall field accuracy |
+| `poststorm_recoup_precision` | Latest eval: recoup precision |
+| `poststorm_recoup_recall` | Latest eval: recoup recall |
+| `poststorm_recoup_f1` | Latest eval: recoup F1 |
+| `poststorm_eval_docs` | Latest eval: document count |
+
+The last five gauges are omitted if no report has been written yet.
+
+### Configuration knobs
+
+| Var | Default | Purpose |
+|---|---|---|
+| `EVAL_DIR` | `./data/eval` | Directory where `report.json` is written and read. |
+| `EVAL_MONEY_TOLERANCE_CENTS` | `0` | Tolerance for money-field comparisons (0 = exact match to the cent). |
+
+### Extension points (not built)
+
+The following are intentionally out of scope for this demo build:
+
+- **Metrics time-series store / Grafana** — `GET /metrics` is a point-in-time snapshot; there is no scrape target, Prometheus instance, or Grafana dashboard.
+- **In-process latency histograms** — extraction and reconcile durations are not instrumented; `GET /metrics` exposes only counts and the latest eval scores.
+- **Per-tenant metric labels** — all gauges are aggregate across tenants; there are no `tenant=` labels.
+
 ---
 
 ## How it works

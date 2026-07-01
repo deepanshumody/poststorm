@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     writeback_idle_sleep: float = 0.25
     export_dir: str = "./data/exports"
 
+    # Observability / eval (sub-project G)
+    eval_dir: str = "./data/eval"
+    eval_money_tolerance_cents: int = 0
+
 
 @lru_cache
 def get_settings() -> Settings:

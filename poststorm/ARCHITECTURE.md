@@ -54,6 +54,10 @@
 | `writeback/relay.py` | `enqueue_pending` — projects `Delivery` rows from the event log for each destination (idempotent) | writeback/models, writeback/payload, ledger/models | DB |
 | `writeback/adapters.py` | `DeliveryResult`, `deliver_file` (JSON + `.835.txt`), `deliver_webhook` (HMAC-signed POST) | writeback/payload, config | filesystem, network |
 | `writeback/worker.py` | `claim_next`, `deliver_one`, `recover_orphans`, `worker_loop`, `relay_loop` (asyncio tasks) | writeback/models, payload, relay, adapters, config | DB, filesystem, network |
+| **`eval/groundtruth.py`** | load `ground_truth.json` → `{doc_id: doc}` dict; `planted_recoup_claims` → set of planted recoup claim ids | — | reads file |
+| **`eval/score.py`** | pure scorer: `field_accuracy`, `recoup_metrics`, `confidence_calibration`, `build_report` | ledger/money, schema | **none** |
+| **`eval/run.py`** | `run_eval` (extract corpus + reconcile + score), `write_report` / `read_report` (`EVAL_DIR/report.json`), `main` entry-point | eval/groundtruth, eval/score, extract, images, reconcile, config | filesystem, network (live run only) |
+| **`metrics.py`** | `render_metrics(session) → str` — Prometheus text format: operational gauges from the DB + latest eval scores | SQLAlchemy models, eval/run | DB, filesystem (report read) |
 
 **The core is pure, the shell is thin.** `reconcile.py` has no I/O and is the most heavily unit-tested module — the
 catastrophic-exception-prone money math is deterministic, not model-driven. This mirrors the "deterministic agents win at
@@ -190,6 +194,21 @@ same delivery. `recover_orphans` resets `delivering → pending` on startup for 
 **Representative 835, not standards-valid X12.** `to_835` produces a human-readable ERA-style remittance
 (BPR / TRN / N1 / CLP / SVC / PLB segments) for demo visibility. The file is labeled in-content as not standards-valid;
 a full X12 835 EDI generator (certified library, proper loop/segment-count envelopes) is a documented extension point.
+
+## Observability & eval
+
+**Track G is read-only and additive.** `backend/eval/` and `backend/metrics.py` observe the existing DB and reuse `extract.py` + `reconcile.py` as-is — the ledger, ingest pipeline, review queue, and write-back layer are entirely untouched.
+
+**Pure scorer.** `eval/score.py` has no I/O: given extracted `LineItem` lists and a ground-truth dict it returns a plain dict. It is deterministic and unit-tested in isolation. The two key scoring definitions:
+
+- **Recall** counts both `matched` and `needs_review` recoup claims as detected (routing a planted claim to the review queue is not a miss).
+- **Precision** is computed over the auto-resolved `matched` set only (auto-resolved caught / all auto-resolved matched).
+
+**Live runner.** `eval/run.py` extracts the fixture corpus via the same `extract.py` + `reconcile.py` stack used in production, scores the result, and writes `EVAL_DIR/report.json`. Per-document extraction failures are logged and skipped without aborting the run.
+
+**Prometheus endpoint.** `GET /metrics` is open (no auth, like `GET /health`) and returns aggregate-only gauges — operational counts from the DB (ledger events, dump-account exposure, review/delivery/ingest/document counts by status) plus the latest eval scores read from `EVAL_DIR/report.json`. There are no per-tenant labels and no PHI. The eval gauges are omitted if no report file exists yet.
+
+**No pipeline instrumentation.** There are no in-process latency histograms, no metrics push from the request path, and no Grafana / time-series store. `GET /metrics` is a point-in-time snapshot derived entirely from existing DB tables and the report file.
 
 ## Tests
 

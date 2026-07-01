@@ -15,7 +15,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend import auth, ratelimit
+from backend import metrics as metrics_module
 from backend.config import get_settings
+from backend.eval import groundtruth as eval_gt
+from backend.eval import run as eval_run
 from backend.ingest import queue as ingest_queue
 from backend.ingest import storage as ingest_storage
 from backend.ingest import worker as ingest_worker
@@ -124,6 +127,7 @@ _AUDIT_ACTIONS = {
     ("POST", "/admin/tenants"): "tenant.create",
     ("POST", "/documents"): "document.upload",
     ("POST", "/documents/demo-batch"): "ingest.demo_batch",
+    ("POST", "/eval/run"): "eval.run",
 }
 
 
@@ -413,6 +417,27 @@ def writeback_retry(delivery_id: int,
         s.close()
 
 
+@app.get("/eval/report")
+def eval_report(principal: auth.Principal = Depends(auth.require_role("viewer")),
+                _rl: auth.Principal = Depends(ratelimit.enforce)):
+    report = eval_run.read_report()
+    if report is None:
+        raise HTTPException(status_code=404, detail="no eval report yet")
+    return report
+
+
+@app.post("/eval/run")
+async def eval_run_endpoint(count: int = 0,
+                            principal: auth.Principal = Depends(auth.require_role("reviewer")),
+                            _rl: auth.Principal = Depends(ratelimit.enforce)):
+    paths = _full_pngs()
+    if count and count > 0:
+        paths = paths[:count]
+    report = await asyncio.to_thread(eval_run.run_eval, paths, eval_gt.load(), settings.cerebras_model)
+    await asyncio.to_thread(eval_run.write_report, report)
+    return report
+
+
 @app.get("/ingest/jobs/{job_id}/stream")
 async def ingest_job_stream(job_id: str, ticket: str = ""):
     bound = STREAM_TICKETS.pop(ticket, None)  # single-use
@@ -454,7 +479,8 @@ async def audit_log(request: Request, call_next):
     action = _audit_action(method, path)
     is_auth_token = (method == "POST" and path == "/auth/token")
     if method in _AUDITED_METHODS and (
-        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/", "/writeback/")) or is_auth_token):
+        path.startswith(("/jobs", "/review/", "/admin/", "/documents", "/ingest/", "/writeback/", "/eval/"))
+        or is_auth_token):
         principal = getattr(request.state, "principal", None)
         s = ledger_db.SessionLocal()
         try:
@@ -601,3 +627,12 @@ async def stream(jid: str, ticket: str = ""):
 @app.get("/health")
 def health():
     return {"ok": True, "version": VERSION, "model": settings.cerebras_model, "docs": len(_full_pngs())}
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    s = ledger_db.SessionLocal()
+    try:
+        return Response(metrics_module.render_metrics(s), media_type="text/plain; version=0.0.4")
+    finally:
+        s.close()
