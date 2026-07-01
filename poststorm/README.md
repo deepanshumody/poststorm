@@ -8,6 +8,8 @@ line with **Gemma‑4 31B (multimodal) on Cerebras**, and runs a **deterministic
 inside the same check (a "dump account"). It posts a **who‑owes‑who ledger** and races a GPU baseline (Google Gemini) to
 show how much faster Cerebras clears the batch.
 
+A working demonstration of **AI-native revenue-cycle automation**, built on one principle: **the model does
+perception; deterministic code does the money.**
 
 > **Synthetic data only — no PHI.** All remittances are generated (see `generator/`). Nothing in this repo is real
 > patient data.
