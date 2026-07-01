@@ -43,16 +43,19 @@ def render_metrics(session) -> str:
                 _labeled(lines, name, help_, rows)
         except Exception:
             pass
-    report = eval_run.read_report()
-    if report:
-        rec = report.get("recoup", {})
-        for name, val in [
-            ("poststorm_field_accuracy", report.get("field_accuracy", {}).get("overall")),
-            ("poststorm_recoup_precision", rec.get("precision")),
-            ("poststorm_recoup_recall", rec.get("recall")),
-            ("poststorm_recoup_f1", rec.get("f1")),
-            ("poststorm_eval_docs", report.get("docs")),
-        ]:
-            if val is not None:
-                _gauge(lines, name, f"Latest eval: {name}", val)
+    try:
+        report = eval_run.read_report()
+        if report:
+            rec = report.get("recoup", {})
+            for name, val in [
+                ("poststorm_field_accuracy", report.get("field_accuracy", {}).get("overall")),
+                ("poststorm_recoup_precision", rec.get("precision")),
+                ("poststorm_recoup_recall", rec.get("recall")),
+                ("poststorm_recoup_f1", rec.get("f1")),
+                ("poststorm_eval_docs", report.get("docs")),
+            ]:
+                if val is not None:
+                    _gauge(lines, name, f"Latest eval: {name}", val)
+    except Exception:
+        pass
     return "\n".join(lines) + "\n"

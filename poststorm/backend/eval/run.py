@@ -1,5 +1,6 @@
 import glob
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,7 +42,9 @@ def report_path(settings=None) -> Path:
 def write_report(report: dict, settings=None) -> str:
     p = report_path(settings)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(report, indent=2))
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(report, indent=2))
+    os.replace(tmp, p)
     return str(p)
 
 

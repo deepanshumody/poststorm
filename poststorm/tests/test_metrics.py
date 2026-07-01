@@ -31,6 +31,21 @@ def test_render_metrics_includes_eval_gauges_when_report_present(tmp_path, monke
     assert "poststorm_recoup_recall 0.75" in text and "poststorm_field_accuracy 0.97" in text
 
 
+def test_render_metrics_degrades_gracefully_on_corrupt_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "eval_dir", str(tmp_path))
+    # Write malformed JSON so read_report() raises json.JSONDecodeError
+    eval_run.report_path().write_text("{not valid json")
+    s = make_memory_session()
+    s.add(Event(tenant_id="demo", batch_id="b", type="payment", source_line_key="k"))
+    s.commit()
+    # Must not raise
+    text = metrics.render_metrics(s)
+    # DB gauge should still be present
+    assert "poststorm_ledger_events" in text
+    # Eval gauges should be absent
+    assert "poststorm_recoup_precision" not in text
+
+
 def test_metrics_endpoint_is_open_text_plain():
     c = TestClient(app)
     r = c.get("/metrics")   # no Authorization header

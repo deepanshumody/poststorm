@@ -28,6 +28,19 @@ def test_write_then_read_report_roundtrips(tmp_path, monkeypatch):
     assert run.read_report()["docs"] == 3
 
 
+def test_write_report_is_atomic_no_tmp_file_remains(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "eval_dir", str(tmp_path))
+    run.write_report({"docs": 7, "model": "test-model"})
+    # Round-trip check
+    result = run.read_report()
+    assert result is not None
+    assert result["docs"] == 7
+    assert result["model"] == "test-model"
+    # No leftover .tmp file
+    tmp_files = list(tmp_path.glob("*.tmp"))
+    assert tmp_files == [], f"Leftover tmp files: {tmp_files}"
+
+
 def test_run_eval_skips_a_failing_doc(monkeypatch):
     gt = groundtruth.load()
     doc_id = next(iter(gt))
